@@ -1,3 +1,4 @@
+from downloader import download_missing_images
 import os
 import argparse
 import json
@@ -109,7 +110,7 @@ def main():
     parser.add_argument("--strict", action="store_true", help="Enforce strict alphanumeric model code matching")
     parser.add_argument("--query-title", default="", help="Pasted title text to use as reference baseline for semantic text similarity")
     parser.add_argument("--image-dir", default="downloaded_images", help="Directory where database images are stored")
-    parser.add_argument("--workers", type=int, default=10, help="Number of download workers")
+    parser.add_argument("--workers", type=int, default=100, help="Number of download workers")
     args = parser.parse_args()
 
     if not os.path.exists(args.query):
@@ -153,9 +154,7 @@ def main():
         df['Source File'] = os.path.basename(args.input)
 
     # Automatically download missing images from dataset
-    from downloader import download_missing_images
     download_missing_images(df, image_dir=args.image_dir, max_workers=args.workers)
-
 
     # Retrieve baseline title for similarity checks
     reference_title = None
