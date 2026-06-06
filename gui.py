@@ -10,7 +10,7 @@ class DuplicateFinderGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("AI Product Duplicate Finder")
-        self.root.geometry("680x520")
+        self.root.geometry("680x700")
         self.root.configure(bg="#0f1423")
         
         # Style
@@ -24,36 +24,22 @@ class DuplicateFinderGUI:
         self.text_light = "#f3f4f6"
         self.text_gray = "#9ca3af"
 
-        # General Styling Configurations
+        # Apply basic configuration to styling
         self.style.configure(".", background=self.card_bg, foreground=self.text_light, font=("Segoe UI", 10))
         self.style.configure("TLabel", background=self.bg_dark, foreground=self.text_light)
         self.style.configure("TFrame", background=self.bg_dark)
         self.style.configure("Card.TFrame", background=self.card_bg, borderwidth=1, relief="solid")
         
-        # Configure Checkbutton
+        # Configure Ttk Checkbutton
         self.style.configure("TCheckbutton", background=self.card_bg, foreground=self.text_light)
         self.style.map("TCheckbutton",
             background=[('active', self.card_bg), ('pressed', self.card_bg)],
             foreground=[('active', '#ffffff')]
         )
         
-        # Configure Spinbox and Progressbar
-        self.style.configure("TSpinbox", fieldbackground="#1b233d", foreground="#ffffff", bordercolor="#1b233d")
+        # Configure Ttk Spinbox and Progressbar
+        self.style.configure("TSpinbox", fieldbackground="#1b233d", foreground="#ffffff")
         self.style.configure("Horizontal.TProgressbar", troughcolor="#121829", background=self.accent_indigo)
-
-        # --- NEW: Button Styling ---
-        self.style.configure("Browse.TButton", background=self.accent_indigo, foreground="#ffffff", borderwidth=0)
-        self.style.map("Browse.TButton", background=[('active', '#4f46e5')])
-
-        self.style.configure("Run.TButton", background=self.accent_indigo, foreground="#ffffff", font=("Segoe UI", 11, "bold"), borderwidth=0)
-        self.style.map("Run.TButton",
-            background=[('disabled', '#4b5563'), ('active', '#4f46e5')],
-            foreground=[('disabled', '#9ca3af')]
-        )
-
-        self.style.configure("View.TButton", background="#10b981", foreground="#ffffff", font=("Segoe UI", 11, "bold"), borderwidth=0)
-        self.style.map("View.TButton", background=[('active', '#059669')])
-        # ---------------------------
         
         # Title Label
         title_lbl = tk.Label(root, text="AI Product Duplicate Finder", bg=self.bg_dark, fg="#ffffff", font=("Segoe UI", 18, "bold"))
@@ -75,8 +61,8 @@ class DuplicateFinderGUI:
         image_entry = tk.Entry(form_card, textvariable=self.image_path_var, width=40, bg="#1b233d", fg="#ffffff", insertbackground="white", relief="flat")
         image_entry.grid(row=0, column=1, padx=5, pady=10, sticky="we")
         
-        # macOS compatible ttk Browse Button
-        browse_btn = ttk.Button(form_card, text="Browse...", command=self.browse_image, style="Browse.TButton")
+        # macOS compatible button
+        browse_btn = tk.Button(form_card, text="Browse...", command=self.browse_image, bg=self.accent_indigo, fg="#ffffff", activebackground="#4f46e5", highlightbackground=self.card_bg, relief="flat", padx=10)
         browse_btn.grid(row=0, column=2, padx=10, pady=10)
         
         # 2. Query Title Row
@@ -103,7 +89,7 @@ class DuplicateFinderGUI:
         
         # Progress Bar & Status Row
         self.progress_frame = tk.Frame(main_frame, bg=self.bg_dark)
-        self.progress_frame.pack(fill="x", pady=15)
+        self.progress_frame.pack(fill="x", pady=10)
         
         self.status_var = tk.StringVar(value="Ready to start search.")
         self.status_lbl = tk.Label(self.progress_frame, textvariable=self.status_var, bg=self.bg_dark, fg=self.text_gray, font=("Segoe UI", 9, "italic"))
@@ -112,15 +98,29 @@ class DuplicateFinderGUI:
         self.progress = ttk.Progressbar(self.progress_frame, mode="indeterminate", style="Horizontal.TProgressbar")
         self.progress.pack(fill="x", pady=2)
         
-        # Action Buttons (Using ttk and ipady for height)
+        # Action Buttons
         btn_frame = tk.Frame(main_frame, bg=self.bg_dark)
         btn_frame.pack(fill="x", pady=5)
         
-        self.run_btn = ttk.Button(btn_frame, text="Find Duplicate Listings", command=self.start_matching_thread, style="Run.TButton")
-        self.run_btn.pack(fill="x", side="left", expand=True, padx=5, ipady=8)
+        self.run_btn = tk.Button(btn_frame, text="Find Duplicate Listings", command=self.start_matching_thread, bg=self.accent_indigo, fg="#ffffff", activebackground="#4f46e5", highlightbackground=self.bg_dark, font=("Segoe UI", 11, "bold"), relief="flat", height=2)
+        self.run_btn.pack(fill="x", side="left", expand=True, padx=5)
         
-        self.view_btn = ttk.Button(btn_frame, text="View Last Results (HTML)", command=self.open_last_results, style="View.TButton")
-        self.view_btn.pack(fill="x", side="left", expand=True, padx=5, ipady=8)
+        self.view_btn = tk.Button(btn_frame, text="View Last Results (HTML)", command=self.open_last_results, bg="#10b981", fg="#ffffff", activebackground="#059669", highlightbackground=self.bg_dark, font=("Segoe UI", 11, "bold"), relief="flat", height=2)
+        self.view_btn.pack(fill="x", side="left", expand=True, padx=5)
+        
+        # Log Panel
+        log_lbl = tk.Label(main_frame, text="Execution Log:", bg=self.bg_dark, fg=self.text_gray, font=("Segoe UI", 9, "bold"))
+        log_lbl.pack(anchor="w", pady=(15, 2))
+        
+        log_frame = tk.Frame(main_frame, bg="#0c101b")
+        log_frame.pack(fill="both", expand=True, pady=5)
+        
+        self.log_text = tk.Text(log_frame, bg="#0c101b", fg="#a5b4fc", insertbackground="white", relief="flat", font=("Consolas", 9), wrap="word")
+        self.log_text.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+        
+        scrollbar = tk.Scrollbar(log_frame, command=self.log_text.yview)
+        scrollbar.pack(side="right", fill="y")
+        self.log_text.config(yscrollcommand=scrollbar.set)
         
         # Grid weight settings for responsiveness
         form_card.columnconfigure(1, weight=1)
@@ -152,15 +152,21 @@ class DuplicateFinderGUI:
             messagebox.showerror("Error", f"Selected image path does not exist:\n{query_image}")
             return
             
-        # Disable input; the style map automatically handles turning it gray (#4b5563)
+        # Disable inputs and clear log
         self.run_btn.config(state="disabled")
         self.progress.start(10)
         self.status_var.set("Initializing AI search model & calculating embeddings...")
+        self.log_text.delete("1.0", tk.END)
+        self.append_log("Starting AI Product Duplicate Finder...\n")
         
         # Start executing the python script in a background thread
         thread = threading.Thread(target=self.run_matching_search, args=(query_image, query_title))
         thread.daemon = True
         thread.start()
+
+    def append_log(self, text):
+        self.log_text.insert(tk.END, text)
+        self.log_text.see(tk.END)
 
     def run_matching_search(self, image_path, query_title):
         try:
@@ -180,17 +186,58 @@ class DuplicateFinderGUI:
             if self.strict_var.get():
                 cmd.append("--strict")
 
-            # Run Python duplicate visual matcher script
-            self.status_var.set("Querying AI model for visual similarities across cached database...")
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            # Run Python duplicate visual matcher script with line-by-line pipe
+            self.root.after(0, self.status_var.set, "Running AI visual search...")
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
             
-            if result.returncode != 0:
-                raise Exception(result.stderr or result.stdout)
+            # Read stdout line by line
+            while True:
+                line = process.stdout.readline()
+                if not line:
+                    break
+                # Filter/clean output or update status dynamically
+                clean_line = line.strip()
+                if clean_line:
+                    if "Checking for missing images" in clean_line:
+                        self.root.after(0, self.status_var.set, "Checking for missing database images...")
+                    elif "Starting download" in clean_line:
+                        self.root.after(0, self.status_var.set, "Downloading missing database images...")
+                    elif "Initializing CLIP text encoder" in clean_line:
+                        self.root.after(0, self.status_var.set, "Loading CLIP model text encoder...")
+                    elif "Performing text similarity search" in clean_line:
+                        self.root.after(0, self.status_var.set, "Calculating semantic text matching...")
+                    elif "Attaching visual similarity scores" in clean_line:
+                        self.root.after(0, self.status_var.set, "Applying rclip visual ranks...")
+                    self.root.after(0, self.append_log, line)
+            
+            process.wait()
+            
+            if process.returncode != 0:
+                raise Exception(f"Visual matcher failed with exit code {process.returncode}")
 
             # Generate the HTML dashboard report
-            self.status_var.set("Compiling final search matches into HTML dashboard...")
-            report_cmd = [py_exe, "generate_report.py"]
-            subprocess.run(report_cmd, check=True)
+            self.root.after(0, self.status_var.set, "Compiling search matches into HTML dashboard...")
+            self.root.after(0, self.append_log, "Generating search_results.html report...\n")
+            
+            report_process = subprocess.Popen(
+                [py_exe, "generate_report.py"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True
+            )
+            report_out, _ = report_process.communicate()
+            if report_out:
+                self.root.after(0, self.append_log, report_out)
+                
+            if report_process.returncode != 0:
+                raise Exception(f"Report generator failed with exit code {report_process.returncode}")
             
             # Succeeded!
             self.root.after(0, self.on_search_success)
@@ -202,6 +249,7 @@ class DuplicateFinderGUI:
         self.progress.stop()
         self.run_btn.config(state="normal")
         self.status_var.set("Search complete! Matches saved to search_results.html")
+        self.append_log("\n[SUCCESS] AI Duplicate Finder completed successfully.\n")
         
         # Prompt to show results
         if messagebox.askyesno("Search Complete", "AI search matching finished successfully!\n\nWould you like to open the HTML results dashboard in your browser?"):
@@ -211,6 +259,7 @@ class DuplicateFinderGUI:
         self.progress.stop()
         self.run_btn.config(state="normal")
         self.status_var.set("Error occurred during search matching.")
+        self.append_log(f"\n[ERROR] Process failed:\n{error_msg}\n")
         messagebox.showerror("Error During Matching", f"An error occurred:\n\n{error_msg}")
 
 if __name__ == "__main__":
