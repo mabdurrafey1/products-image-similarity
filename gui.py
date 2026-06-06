@@ -155,21 +155,27 @@ class DuplicateFinderGUI:
 
             # Run Python duplicate visual matcher script with line-by-line pipe
             self.root.after(0, self.status_var.set, "Running AI visual search...")
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                universal_newlines=True
-            )
+            
+            # Configure process parameters for Windows compatibility
+            kwargs = {
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.STDOUT,
+                "text": True,
+                "bufsize": 1,
+                "universal_newlines": True,
+                "encoding": "utf-8"
+            }
+            if sys.platform.startswith("win"):
+                kwargs["creationflags"] = 0x08000000 # CREATE_NO_WINDOW
+                kwargs["shell"] = True
+
+            process = subprocess.Popen(cmd, **kwargs)
             
             # Read stdout line by line
             while True:
                 line = process.stdout.readline()
                 if not line:
                     break
-                # Filter/clean output or update status dynamically
                 clean_line = line.strip()
                 if clean_line:
                     if "Checking for missing images" in clean_line:
@@ -195,9 +201,7 @@ class DuplicateFinderGUI:
             
             report_process = subprocess.Popen(
                 [py_exe, "generate_report.py"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True
+                **kwargs
             )
             report_out, _ = report_process.communicate()
             if report_out:
