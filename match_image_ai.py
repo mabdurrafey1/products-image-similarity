@@ -125,9 +125,8 @@ def main():
             print(f"Error: Input dataset path '{args.input}' not found.")
             return
 
-    if not os.path.exists(args.image_dir) or not os.listdir(args.image_dir):
-        print(f"Error: Database image directory '{args.image_dir}' is empty. Run download_all_images.py first to cache images.")
-        return
+    if not os.path.exists(args.image_dir):
+        os.makedirs(args.image_dir, exist_ok=True)
 
     # Load dataset to map filenames back to SKUs/rows
     if os.path.isdir(args.input):
@@ -152,6 +151,46 @@ def main():
     else:
         df = pd.read_excel(args.input)
         df['Source File'] = os.path.basename(args.input)
+
+    # Automatically download missing images from dataset
+    print("Checking for missing images in database...")
+    import requests
+    from concurrent.futures import ThreadPoolExecutor
+    
+    # Identify items to download
+    download_tasks = []
+    for idx, row in df.iterrows():
+        sku = str(row.get('SKU', '')).strip()
+        url = str(row.get('Image URL', '')).strip()
+        if not sku or not url or url.lower() == 'nan':
+            continue
+        
+        # Check if image already exists
+        img_name = f"{sku}.jpg"
+        img_path = os.path.join(args.image_dir, img_name)
+        if not os.path.exists(img_path):
+            download_tasks.append((sku, url, img_path))
+            
+    if download_tasks:
+        print(f"Found {len(download_tasks)} missing images. Starting download using {args.workers} workers...")
+        def download_single(task):
+            sku, url, dest = task
+            try:
+                r = requests.get(url, timeout=15)
+                if r.status_code == 200:
+                    with open(dest, 'wb') as f:
+                        f.write(r.content)
+                else:
+                    print(f"Failed downloading SKU {sku}: status code {r.status_code}")
+            except Exception as e:
+                print(f"Failed downloading SKU {sku}: {e}")
+
+        with ThreadPoolExecutor(max_workers=args.workers) as executor:
+            executor.map(download_single, download_tasks)
+        print("Image download complete.\n")
+    else:
+        print("All database images are already cached locally.\n")
+
 
     # Retrieve baseline title for similarity checks
     reference_title = None
