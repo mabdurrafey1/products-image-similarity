@@ -1,6 +1,5 @@
 import os
 import requests
-import pandas as pd
 from concurrent.futures import ThreadPoolExecutor
 
 def download_missing_images(df, image_dir="downloaded_images", max_workers=30):

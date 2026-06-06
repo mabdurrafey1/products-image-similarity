@@ -24,7 +24,7 @@ def main():
     match_script = os.path.join(base_dir, "match_image_ai.py")
     report_script = os.path.join(base_dir, "generate_report.py")
 
-    print(f"--- Running Duplicate Visual Matcher ---")
+    print("--- Running Duplicate Visual Matcher ---")
     search_cmd = [
         sys.executable, match_script,
         "--query", args.query,
@@ -41,7 +41,7 @@ def main():
         print(f"Error running search matching: {e}")
         sys.exit(1)
 
-    print(f"\n--- Generating HTML Report ---")
+    print("\n--- Generating HTML Report ---")
     try:
         subprocess.run([sys.executable, report_script], check=True)
     except subprocess.CalledProcessError as e:

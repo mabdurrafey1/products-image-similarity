@@ -9,7 +9,6 @@ from downloader import download_missing_images
 import os
 import argparse
 import json
-import subprocess
 import re
 import pandas as pd
 from rclip.model import Model as RClipModel
@@ -280,7 +279,6 @@ def main():
                 continue
             
             price = row.get('Price', '')
-            img_url = row.get('Image URL', '')
             source_file = row.get('Source File', 'Unknown')
             
             results_data.append({
