@@ -232,9 +232,12 @@ def main():
     if reference_title and clip_model is not None and ref_emb is not None:
         print("Performing text similarity search across all products in Excel...")
         
-        # Step 1: Pre-filter by quick keyword overlap to reduce candidates
+        # Step 1: Pre-filter by quick keyword overlap and check if visual score is available to reduce candidates
         candidates = []
         for idx, row in df.iterrows():
+            sku = str(row.get('SKU', ''))
+            if sku not in visual_scores:
+                continue
             title = str(row.get('Title', ''))
             if not title:
                 continue
@@ -243,7 +246,7 @@ def main():
             if get_title_similarity(reference_title, title) > 0.0:
                 candidates.append((idx, row, title))
         
-        print(f"Found {len(candidates)} candidate products with keyword overlap. Computing semantic similarity...")
+        print(f"Found {len(candidates)} candidate products with keyword overlap and visual score. Computing semantic similarity...")
         
         # Step 2: Batch compute text embeddings for candidates
         threshold = args.min_text_sim if args.min_text_sim > 0.0 else 0.70
