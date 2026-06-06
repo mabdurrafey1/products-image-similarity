@@ -4,7 +4,6 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import subprocess
 import threading
-import json
 import webbrowser
 
 class DuplicateFinderGUI:
@@ -25,22 +24,36 @@ class DuplicateFinderGUI:
         self.text_light = "#f3f4f6"
         self.text_gray = "#9ca3af"
 
-        # Apply basic configuration to styling
+        # General Styling Configurations
         self.style.configure(".", background=self.card_bg, foreground=self.text_light, font=("Segoe UI", 10))
         self.style.configure("TLabel", background=self.bg_dark, foreground=self.text_light)
         self.style.configure("TFrame", background=self.bg_dark)
         self.style.configure("Card.TFrame", background=self.card_bg, borderwidth=1, relief="solid")
         
-        # Configure Ttk Checkbutton
+        # Configure Checkbutton
         self.style.configure("TCheckbutton", background=self.card_bg, foreground=self.text_light)
         self.style.map("TCheckbutton",
             background=[('active', self.card_bg), ('pressed', self.card_bg)],
             foreground=[('active', '#ffffff')]
         )
         
-        # Configure Ttk Spinbox and Progressbar
-        self.style.configure("TSpinbox", fieldbackground="#1b233d", foreground="#ffffff")
+        # Configure Spinbox and Progressbar
+        self.style.configure("TSpinbox", fieldbackground="#1b233d", foreground="#ffffff", bordercolor="#1b233d")
         self.style.configure("Horizontal.TProgressbar", troughcolor="#121829", background=self.accent_indigo)
+
+        # --- NEW: Button Styling ---
+        self.style.configure("Browse.TButton", background=self.accent_indigo, foreground="#ffffff", borderwidth=0)
+        self.style.map("Browse.TButton", background=[('active', '#4f46e5')])
+
+        self.style.configure("Run.TButton", background=self.accent_indigo, foreground="#ffffff", font=("Segoe UI", 11, "bold"), borderwidth=0)
+        self.style.map("Run.TButton",
+            background=[('disabled', '#4b5563'), ('active', '#4f46e5')],
+            foreground=[('disabled', '#9ca3af')]
+        )
+
+        self.style.configure("View.TButton", background="#10b981", foreground="#ffffff", font=("Segoe UI", 11, "bold"), borderwidth=0)
+        self.style.map("View.TButton", background=[('active', '#059669')])
+        # ---------------------------
         
         # Title Label
         title_lbl = tk.Label(root, text="AI Product Duplicate Finder", bg=self.bg_dark, fg="#ffffff", font=("Segoe UI", 18, "bold"))
@@ -62,8 +75,8 @@ class DuplicateFinderGUI:
         image_entry = tk.Entry(form_card, textvariable=self.image_path_var, width=40, bg="#1b233d", fg="#ffffff", insertbackground="white", relief="flat")
         image_entry.grid(row=0, column=1, padx=5, pady=10, sticky="we")
         
-        # macOS compatible button
-        browse_btn = tk.Button(form_card, text="Browse...", command=self.browse_image, bg=self.accent_indigo, fg="#ffffff", activebackground="#4f46e5", highlightbackground=self.card_bg, relief="flat", padx=10)
+        # macOS compatible ttk Browse Button
+        browse_btn = ttk.Button(form_card, text="Browse...", command=self.browse_image, style="Browse.TButton")
         browse_btn.grid(row=0, column=2, padx=10, pady=10)
         
         # 2. Query Title Row
@@ -99,15 +112,15 @@ class DuplicateFinderGUI:
         self.progress = ttk.Progressbar(self.progress_frame, mode="indeterminate", style="Horizontal.TProgressbar")
         self.progress.pack(fill="x", pady=2)
         
-        # Action Buttons
+        # Action Buttons (Using ttk and ipady for height)
         btn_frame = tk.Frame(main_frame, bg=self.bg_dark)
         btn_frame.pack(fill="x", pady=5)
         
-        self.run_btn = tk.Button(btn_frame, text="Find Duplicate Listings", command=self.start_matching_thread, bg=self.accent_indigo, fg="#ffffff", activebackground="#4f46e5", highlightbackground=self.bg_dark, font=("Segoe UI", 11, "bold"), relief="flat", height=2)
-        self.run_btn.pack(fill="x", side="left", expand=True, padx=5)
+        self.run_btn = ttk.Button(btn_frame, text="Find Duplicate Listings", command=self.start_matching_thread, style="Run.TButton")
+        self.run_btn.pack(fill="x", side="left", expand=True, padx=5, ipady=8)
         
-        self.view_btn = tk.Button(btn_frame, text="View Last Results (HTML)", command=self.open_last_results, bg="#10b981", fg="#ffffff", activebackground="#059669", highlightbackground=self.bg_dark, font=("Segoe UI", 11, "bold"), relief="flat", height=2)
-        self.view_btn.pack(fill="x", side="left", expand=True, padx=5)
+        self.view_btn = ttk.Button(btn_frame, text="View Last Results (HTML)", command=self.open_last_results, style="View.TButton")
+        self.view_btn.pack(fill="x", side="left", expand=True, padx=5, ipady=8)
         
         # Grid weight settings for responsiveness
         form_card.columnconfigure(1, weight=1)
@@ -139,8 +152,8 @@ class DuplicateFinderGUI:
             messagebox.showerror("Error", f"Selected image path does not exist:\n{query_image}")
             return
             
-        # Disable inputs and show running progress
-        self.run_btn.config(state="disabled", bg="#4b5563")
+        # Disable input; the style map automatically handles turning it gray (#4b5563)
+        self.run_btn.config(state="disabled")
         self.progress.start(10)
         self.status_var.set("Initializing AI search model & calculating embeddings...")
         
@@ -187,7 +200,7 @@ class DuplicateFinderGUI:
 
     def on_search_success(self):
         self.progress.stop()
-        self.run_btn.config(state="normal", bg=self.accent_indigo)
+        self.run_btn.config(state="normal")
         self.status_var.set("Search complete! Matches saved to search_results.html")
         
         # Prompt to show results
@@ -196,7 +209,7 @@ class DuplicateFinderGUI:
 
     def on_search_error(self, error_msg):
         self.progress.stop()
-        self.run_btn.config(state="normal", bg=self.accent_indigo)
+        self.run_btn.config(state="normal")
         self.status_var.set("Error occurred during search matching.")
         messagebox.showerror("Error During Matching", f"An error occurred:\n\n{error_msg}")
 
