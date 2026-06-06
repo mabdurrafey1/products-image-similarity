@@ -11,111 +11,78 @@ class DuplicateFinderGUI:
         self.root = root
         self.root.title("AI Product Duplicate Finder")
         self.root.geometry("680x700")
-        self.root.configure(bg="#0f1423")
-        
-        # Style
-        self.style = ttk.Style()
-        self.style.theme_use('clam')
-        
-        # Colors
-        self.bg_dark = "#0f1423"
-        self.card_bg = "#121829"
-        self.accent_indigo = "#6366f1"
-        self.text_light = "#f3f4f6"
-        self.text_gray = "#9ca3af"
-
-        # Apply basic configuration to styling
-        self.style.configure(".", background=self.card_bg, foreground=self.text_light, font=("Segoe UI", 10))
-        self.style.configure("TLabel", background=self.bg_dark, foreground=self.text_light)
-        self.style.configure("TFrame", background=self.bg_dark)
-        self.style.configure("Card.TFrame", background=self.card_bg, borderwidth=1, relief="solid")
-        
-        # Configure Ttk Checkbutton
-        self.style.configure("TCheckbutton", background=self.card_bg, foreground=self.text_light)
-        self.style.map("TCheckbutton",
-            background=[('active', self.card_bg), ('pressed', self.card_bg)],
-            foreground=[('active', '#ffffff')]
-        )
-        
-        # Configure Ttk Spinbox and Progressbar
-        self.style.configure("TSpinbox", fieldbackground="#1b233d", foreground="#ffffff")
-        self.style.configure("Horizontal.TProgressbar", troughcolor="#121829", background=self.accent_indigo)
-        
-        # Title Label
-        title_lbl = tk.Label(root, text="AI Product Duplicate Finder", bg=self.bg_dark, fg="#ffffff", font=("Segoe UI", 18, "bold"))
-        title_lbl.pack(pady=15)
+        self.root.geometry("680x700")
         
         # Main Layout Container
-        main_frame = ttk.Frame(root, style="TFrame")
+        main_frame = tk.Frame(root)
         main_frame.pack(fill="both", expand=True, padx=20, pady=10)
         
         # Form Card Frame
-        form_card = ttk.Frame(main_frame, style="Card.TFrame")
-        form_card.pack(fill="x", ipady=15, ipadx=15, pady=5)
+        form_card = tk.LabelFrame(main_frame, text=" AI Search Parameters ", font=("Segoe UI", 10, "bold"), padx=15, pady=15)
+        form_card.pack(fill="x", pady=5)
         
         # 1. Query Image Selection Row
-        image_label = tk.Label(form_card, text="Query Image:", bg=self.card_bg, fg=self.text_light, font=("Segoe UI", 10, "bold"))
-        image_label.grid(row=0, column=0, sticky="w", padx=10, pady=10)
+        image_label = tk.Label(form_card, text="Query Image:")
+        image_label.grid(row=0, column=0, sticky="w", padx=5, pady=10)
         
         self.image_path_var = tk.StringVar()
-        image_entry = tk.Entry(form_card, textvariable=self.image_path_var, width=40, bg="#1b233d", fg="#ffffff", insertbackground="white", relief="flat")
+        image_entry = tk.Entry(form_card, textvariable=self.image_path_var, width=40)
         image_entry.grid(row=0, column=1, padx=5, pady=10, sticky="we")
         
-        # macOS compatible button
-        browse_btn = tk.Button(form_card, text="Browse...", command=self.browse_image, bg=self.accent_indigo, fg="#ffffff", activebackground="#4f46e5", highlightbackground=self.card_bg, relief="flat", padx=10)
-        browse_btn.grid(row=0, column=2, padx=10, pady=10)
+        browse_btn = tk.Button(form_card, text="Browse...", command=self.browse_image)
+        browse_btn.grid(row=0, column=2, padx=5, pady=10)
         
         # 2. Query Title Row
-        title_label = tk.Label(form_card, text="Query Title:", bg=self.card_bg, fg=self.text_light, font=("Segoe UI", 10, "bold"))
-        title_label.grid(row=1, column=0, sticky="nw", padx=10, pady=10)
+        title_label = tk.Label(form_card, text="Query Title:")
+        title_label.grid(row=1, column=0, sticky="nw", padx=5, pady=10)
         
-        self.title_text = tk.Text(form_card, height=3, width=40, bg="#1b233d", fg="#ffffff", insertbackground="white", relief="flat", font=("Segoe UI", 10))
+        self.title_text = tk.Text(form_card, height=3, width=40, font=("Segoe UI", 10))
         self.title_text.grid(row=1, column=1, columnspan=2, padx=5, pady=10, sticky="we")
         
         # 3. Settings Row
-        settings_frame = tk.Frame(form_card, bg=self.card_bg)
-        settings_frame.grid(row=2, column=0, columnspan=3, pady=10, sticky="w", padx=10)
+        settings_frame = tk.Frame(form_card)
+        settings_frame.grid(row=2, column=0, columnspan=3, pady=10, sticky="w", padx=5)
         
         self.strict_var = tk.BooleanVar(value=True)
-        strict_cb = ttk.Checkbutton(settings_frame, text="Enforce Strict Model Matching", variable=self.strict_var, style="TCheckbutton")
+        strict_cb = tk.Checkbutton(settings_frame, text="Enforce Strict Model Matching", variable=self.strict_var)
         strict_cb.pack(side="left", padx=5)
         
-        top_lbl = tk.Label(settings_frame, text="Limit Matches:", bg=self.card_bg, fg=self.text_light)
+        top_lbl = tk.Label(settings_frame, text="Limit Matches:")
         top_lbl.pack(side="left", padx=(20, 5))
         
         self.top_var = tk.StringVar(value="50")
-        top_spinner = ttk.Spinbox(settings_frame, from_=5, to=200, width=5, textvariable=self.top_var, style="TSpinbox")
+        top_spinner = tk.Spinbox(settings_frame, from_=5, to=200, width=5, textvariable=self.top_var)
         top_spinner.pack(side="left", padx=5)
         
         # Progress Bar & Status Row
-        self.progress_frame = tk.Frame(main_frame, bg=self.bg_dark)
+        self.progress_frame = tk.Frame(main_frame)
         self.progress_frame.pack(fill="x", pady=10)
         
         self.status_var = tk.StringVar(value="Ready to start search.")
-        self.status_lbl = tk.Label(self.progress_frame, textvariable=self.status_var, bg=self.bg_dark, fg=self.text_gray, font=("Segoe UI", 9, "italic"))
+        self.status_lbl = tk.Label(self.progress_frame, textvariable=self.status_var, font=("Segoe UI", 9, "italic"))
         self.status_lbl.pack(anchor="w", pady=2)
         
-        self.progress = ttk.Progressbar(self.progress_frame, mode="indeterminate", style="Horizontal.TProgressbar")
+        self.progress = ttk.Progressbar(self.progress_frame, mode="indeterminate")
         self.progress.pack(fill="x", pady=2)
         
         # Action Buttons
-        btn_frame = tk.Frame(main_frame, bg=self.bg_dark)
+        btn_frame = tk.Frame(main_frame)
         btn_frame.pack(fill="x", pady=5)
         
-        self.run_btn = tk.Button(btn_frame, text="Find Duplicate Listings", command=self.start_matching_thread, bg=self.accent_indigo, fg="#ffffff", activebackground="#4f46e5", highlightbackground=self.bg_dark, font=("Segoe UI", 11, "bold"), relief="flat", height=2)
+        self.run_btn = tk.Button(btn_frame, text="Find Duplicate Listings", command=self.start_matching_thread, font=("Segoe UI", 11, "bold"), height=2)
         self.run_btn.pack(fill="x", side="left", expand=True, padx=5)
         
-        self.view_btn = tk.Button(btn_frame, text="View Last Results (HTML)", command=self.open_last_results, bg="#10b981", fg="#ffffff", activebackground="#059669", highlightbackground=self.bg_dark, font=("Segoe UI", 11, "bold"), relief="flat", height=2)
+        self.view_btn = tk.Button(btn_frame, text="View Last Results (HTML)", command=self.open_last_results, font=("Segoe UI", 11, "bold"), height=2)
         self.view_btn.pack(fill="x", side="left", expand=True, padx=5)
         
         # Log Panel
-        log_lbl = tk.Label(main_frame, text="Execution Log:", bg=self.bg_dark, fg=self.text_gray, font=("Segoe UI", 9, "bold"))
+        log_lbl = tk.Label(main_frame, text="Execution Log:", font=("Segoe UI", 9, "bold"))
         log_lbl.pack(anchor="w", pady=(15, 2))
         
-        log_frame = tk.Frame(main_frame, bg="#0c101b")
+        log_frame = tk.Frame(main_frame, bd=1, relief="sunken")
         log_frame.pack(fill="both", expand=True, pady=5)
         
-        self.log_text = tk.Text(log_frame, bg="#0c101b", fg="#a5b4fc", insertbackground="white", relief="flat", font=("Consolas", 9), wrap="word")
+        self.log_text = tk.Text(log_frame, font=("Consolas", 9), wrap="word")
         self.log_text.pack(side="left", fill="both", expand=True, padx=5, pady=5)
         
         scrollbar = tk.Scrollbar(log_frame, command=self.log_text.yview)
