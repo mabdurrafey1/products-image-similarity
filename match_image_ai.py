@@ -7,17 +7,6 @@ import re
 import pandas as pd
 from rclip.model import Model as RClipModel
 
-def find_rclip_executable():
-    """Find the path to the rclip executable."""
-    # Try Windows path
-    venv_rclip_win = os.path.abspath(os.path.join(".venv", "Scripts", "rclip.exe"))
-    if os.path.exists(venv_rclip_win):
-        return venv_rclip_win
-    # Try Unix path
-    venv_rclip_unix = os.path.abspath(os.path.join(".venv", "bin", "rclip"))
-    if os.path.exists(venv_rclip_unix):
-        return venv_rclip_unix
-    return "rclip"
 
 def clean_title(title):
     """Clean and normalize product titles for keyword overlap comparison."""
@@ -169,38 +158,31 @@ def main():
             reference_title = str(query_matching_rows.iloc[0].get('Title', ''))
             print(f"Baseline model reference determined from query filename: '{reference_title}'\n")
 
-    # Run rclip visual search to get visual similarity scores for all cached images
-    rclip_exe = find_rclip_executable()
+    # Run rclip visual search in-process to get visual similarity scores
+    from rclip.main import init_rclip
     abs_query_path = os.path.abspath(args.query)
     visual_scores = {}
-    print(f"Using rclip executable: {rclip_exe}")
-    print("Querying AI model for visual similarity scores...")
+    print("Querying AI model for visual similarity scores (in-process)...")
     try:
-        # Request up to 100,000 matches to cover all cached files
-        result = subprocess.run(
-            [rclip_exe, "--top", "500", abs_query_path],
-            cwd=args.image_dir,
-            capture_output=True,
-            text=True,
-            check=True
+        rclip_instance, rclip_model, rclip_db = init_rclip(
+            working_directory=os.path.abspath(args.image_dir),
+            indexing_batch_size=32,
+            no_indexing=False
         )
-        output_lines = result.stdout.strip().split('\n')
-        for line in output_lines:
-            line_str = line.strip()
-            if not line_str or line_str.startswith("score\t") or line_str.startswith("score "):
-                continue
-            parts = line_str.split('\t')
-            if len(parts) < 2:
-                parts = line_str.split()
-            if len(parts) >= 2:
-                try:
-                    score = float(parts[0])
-                    filepath = parts[1].strip('"\'')
-                    sku = os.path.splitext(os.path.basename(filepath))[0]
-                    visual_scores[sku] = score
-                except ValueError:
-                    continue
-        print(f"Successfully loaded {len(visual_scores)} visual similarity scores from cache.")
+        try:
+            search_results = rclip_instance.search(
+                query=abs_query_path,
+                directory=os.path.abspath(args.image_dir),
+                top_k=500
+            )
+            for item in search_results:
+                filename = os.path.basename(item.filepath)
+                sku = os.path.splitext(filename)[0]
+                visual_scores[sku] = item.score
+        finally:
+            rclip_model.close()
+            rclip_db.close()
+        print(f"Successfully loaded {len(visual_scores)} visual similarity scores.")
     except Exception as e:
         print(f"Warning: Could not run rclip visual search: {e}")
 

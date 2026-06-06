@@ -2,9 +2,40 @@ import os
 import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-import subprocess
 import threading
 import webbrowser
+import match_image_ai
+import generate_report
+
+class CustomStdout:
+    def __init__(self, root, log_text, status_var):
+        self.root = root
+        self.log_text = log_text
+        self.status_var = status_var
+
+    def write(self, text):
+        self.root.after(0, self._safe_write, text)
+
+    def _safe_write(self, text):
+        self.log_text.insert(tk.END, text)
+        self.log_text.see(tk.END)
+        
+        # Check text for status updates
+        clean_line = text.strip()
+        if clean_line:
+            if "Checking for missing images" in clean_line:
+                self.status_var.set("Checking for missing database images...")
+            elif "Starting download" in clean_line:
+                self.status_var.set("Downloading missing database images...")
+            elif "Initializing CLIP text encoder" in clean_line:
+                self.status_var.set("Loading CLIP model text encoder...")
+            elif "Performing text similarity search" in clean_line:
+                self.status_var.set("Calculating semantic text matching...")
+            elif "Attaching visual similarity scores" in clean_line:
+                self.status_var.set("Applying rclip visual ranks...")
+
+    def flush(self):
+        pass
 
 class DuplicateFinderGUI:
     def __init__(self, root):
@@ -137,79 +168,39 @@ class DuplicateFinderGUI:
 
     def run_matching_search(self, image_path, query_title):
         try:
-            # Construct execution parameters
-            py_exe = os.path.join(".venv", "bin", "python")
-            if sys.platform.startswith("win"):
-                py_exe = os.path.join(".venv", "Scripts", "python.exe")
-            if not os.path.exists(py_exe):
-                py_exe = "python" # fallback
-
-            cmd = [
-                py_exe, "-u", "match_image_ai.py",
+            # Set up command line arguments for match_image_ai
+            old_argv = sys.argv
+            sys.argv = [
+                "match_image_ai.py",
                 "--query", image_path,
                 "--query-title", query_title,
                 "--top", self.top_var.get()
             ]
             if self.strict_var.get():
-                cmd.append("--strict")
+                sys.argv.append("--strict")
 
-            # Run Python duplicate visual matcher script with line-by-line pipe
             self.root.after(0, self.status_var.set, "Running AI visual search...")
             
-            # Configure process parameters for Windows compatibility
-            kwargs = {
-                "stdout": subprocess.PIPE,
-                "stderr": subprocess.STDOUT,
-                "text": True,
-                "bufsize": 1,
-                "universal_newlines": True,
-                "encoding": "utf-8"
-            }
-            if sys.platform.startswith("win"):
-                kwargs["creationflags"] = 0x08000000 # CREATE_NO_WINDOW
-                kwargs["shell"] = True
-
-            process = subprocess.Popen(cmd, **kwargs)
+            # Redirect stdout/stderr to the GUI log window
+            redirector = CustomStdout(self.root, self.log_text, self.status_var)
             
-            # Read stdout line by line
-            while True:
-                line = process.stdout.readline()
-                if not line:
-                    break
-                clean_line = line.strip()
-                if clean_line:
-                    if "Checking for missing images" in clean_line:
-                        self.root.after(0, self.status_var.set, "Checking for missing database images...")
-                    elif "Starting download" in clean_line:
-                        self.root.after(0, self.status_var.set, "Downloading missing database images...")
-                    elif "Initializing CLIP text encoder" in clean_line:
-                        self.root.after(0, self.status_var.set, "Loading CLIP model text encoder...")
-                    elif "Performing text similarity search" in clean_line:
-                        self.root.after(0, self.status_var.set, "Calculating semantic text matching...")
-                    elif "Attaching visual similarity scores" in clean_line:
-                        self.root.after(0, self.status_var.set, "Applying rclip visual ranks...")
-                    self.root.after(0, self.append_log, line)
-            
-            process.wait()
-            
-            if process.returncode != 0:
-                raise Exception(f"Visual matcher failed with exit code {process.returncode}")
-
-            # Generate the HTML dashboard report
-            self.root.after(0, self.status_var.set, "Compiling search matches into HTML dashboard...")
-            self.root.after(0, self.append_log, "Generating search_results.html report...\n")
-            
-            report_process = subprocess.Popen(
-                [py_exe, "generate_report.py"],
-                **kwargs
-            )
-            report_out, _ = report_process.communicate()
-            if report_out:
-                self.root.after(0, self.append_log, report_out)
+            try:
+                sys.stdout = redirector
+                sys.stderr = redirector
                 
-            if report_process.returncode != 0:
-                raise Exception(f"Report generator failed with exit code {report_process.returncode}")
-            
+                # Execute match_image_ai main method
+                match_image_ai.main()
+                
+                # Execute generate_report html generator
+                self.root.after(0, self.status_var.set, "Compiling search matches into HTML dashboard...")
+                self.root.after(0, self.append_log, "Generating search_results.html report...\n")
+                
+                generate_report.generate_html_report()
+            finally:
+                sys.argv = old_argv
+                sys.stdout = sys.__stdout__
+                sys.stderr = sys.__stderr__
+
             # Succeeded!
             self.root.after(0, self.on_search_success)
             
