@@ -145,7 +145,7 @@ class DuplicateFinderGUI:
                 py_exe = "python" # fallback
 
             cmd = [
-                py_exe, "match_image_ai.py",
+                py_exe, "-u", "match_image_ai.py",
                 "--query", image_path,
                 "--query-title", query_title,
                 "--top", self.top_var.get()
