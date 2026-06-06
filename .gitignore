@@ -1,7 +1,5 @@
 .venv/
 __pycache__/
-*.xlsx
-*.xls
 downloaded_images/
 duplicate_groups.json
 search_results.json
