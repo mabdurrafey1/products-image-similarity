@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor
 
-def download_missing_images(df, image_dir="downloaded_images", max_workers=10):
+def download_missing_images(df, image_dir="downloaded_images", max_workers=30):
     """
     Checks the loaded pandas DataFrame for product SKU and Image URL values,
     and concurrently downloads any images that are not cached locally.

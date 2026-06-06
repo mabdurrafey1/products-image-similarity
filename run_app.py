@@ -1,5 +1,11 @@
 import os
 import sys
+import datetime
+
+# Check if the date is after June 9, 2026
+if datetime.date.today() > datetime.date(2026, 6, 9):
+    sys.exit("This version of the program has expired. It is not available after June 9, 2026.")
+
 import subprocess
 import webbrowser
 import argparse

@@ -1,5 +1,20 @@
 import os
 import sys
+import datetime
+
+# Check if the date is after June 9, 2026
+if datetime.date.today() > datetime.date(2026, 6, 9):
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror("Expired", "This version of the program has expired. It is not available after June 9, 2026.")
+        root.destroy()
+    except Exception:
+        pass
+    sys.exit("This version of the program has expired. It is not available after June 9, 2026.")
+
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import threading

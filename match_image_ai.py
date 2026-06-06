@@ -1,3 +1,10 @@
+import datetime
+import sys
+
+# Check if the date is after June 9, 2026
+if datetime.date.today() > datetime.date(2026, 6, 9):
+    sys.exit("This version of the program has expired. It is not available after June 9, 2026.")
+
 from downloader import download_missing_images
 import os
 import argparse
@@ -99,7 +106,7 @@ def main():
     parser.add_argument("--strict", action="store_true", help="Enforce strict alphanumeric model code matching")
     parser.add_argument("--query-title", default="", help="Pasted title text to use as reference baseline for semantic text similarity")
     parser.add_argument("--image-dir", default="downloaded_images", help="Directory where database images are stored")
-    parser.add_argument("--workers", type=int, default=100, help="Number of download workers")
+    parser.add_argument("--workers", type=int, default=30, help="Number of download workers")
     args = parser.parse_args()
 
     if not os.path.exists(args.query):
