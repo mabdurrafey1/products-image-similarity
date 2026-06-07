@@ -93,8 +93,12 @@ class DuplicateFinderGUI:
         strict_cb = tk.Checkbutton(settings_frame, text="Enforce Strict Model Matching", variable=self.strict_var)
         strict_cb.pack(side="left", padx=5)
         
+        self.no_indexing_var = tk.BooleanVar(value=False)
+        no_indexing_cb = tk.Checkbutton(settings_frame, text="Skip Image Index Check", variable=self.no_indexing_var)
+        no_indexing_cb.pack(side="left", padx=5)
+        
         top_lbl = tk.Label(settings_frame, text="Limit Matches:")
-        top_lbl.pack(side="left", padx=(20, 5))
+        top_lbl.pack(side="left", padx=(10, 5))
         
         self.top_var = tk.StringVar(value="50")
         top_spinner = tk.Spinbox(settings_frame, from_=5, to=200, width=5, textvariable=self.top_var)
@@ -193,6 +197,8 @@ class DuplicateFinderGUI:
             ]
             if self.strict_var.get():
                 sys.argv.append("--strict")
+            if self.no_indexing_var.get():
+                sys.argv.append("--no-indexing")
 
             self.root.after(0, self.status_var.set, "Running AI visual search...")
             

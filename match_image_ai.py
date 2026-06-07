@@ -106,6 +106,7 @@ def main():
     parser.add_argument("--query-title", default="", help="Pasted title text to use as reference baseline for semantic text similarity")
     parser.add_argument("--image-dir", default="downloaded_images", help="Directory where database images are stored")
     parser.add_argument("--workers", type=int, default=30, help="Number of download workers")
+    parser.add_argument("--no-indexing", action="store_true", help="Skip checking/indexing images in the target directory")
     args = parser.parse_args()
 
     if not os.path.exists(args.query):
@@ -173,7 +174,7 @@ def main():
         rclip_instance, rclip_model, rclip_db = init_rclip(
             working_directory=os.path.abspath(args.image_dir),
             indexing_batch_size=32,
-            no_indexing=False
+            no_indexing=args.no_indexing
         )
         try:
             search_results = rclip_instance.search(
