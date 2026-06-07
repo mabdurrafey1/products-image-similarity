@@ -149,10 +149,7 @@ def main():
         df = pd.read_excel(args.input)
         df['Source File'] = os.path.basename(args.input)
 
-    # Automatically download missing images from dataset
-    download_missing_images(df, image_dir=args.image_dir, max_workers=args.workers)
-
-    # Retrieve baseline title for similarity checks
+    # Retrieve baseline title for similarity checks first
     reference_title = None
     if args.query_title:
         reference_title = args.query_title
@@ -164,6 +161,23 @@ def main():
         if not query_matching_rows.empty:
             reference_title = str(query_matching_rows.iloc[0].get('Title', ''))
             print(f"Baseline model reference determined from query filename: '{reference_title}'\n")
+
+    # Automatically download missing images from dataset (filtered if reference_title is resolved)
+    download_df = df
+    if reference_title:
+        print("Pre-filtering database to download images only for keyword-overlapping products...")
+        filtered_rows = []
+        for idx, row in df.iterrows():
+            title = str(row.get('Title', ''))
+            if title and get_title_similarity(reference_title, title) > 0.0:
+                filtered_rows.append(row)
+        if filtered_rows:
+            download_df = pd.DataFrame(filtered_rows)
+            print(f"Filtered download queue: {len(download_df)} products with keyword overlap (down from {len(df)} total).")
+        else:
+            print("Warning: No products found with keyword overlap. Downloading all missing images as fallback.")
+
+    download_missing_images(download_df, image_dir=args.image_dir, max_workers=args.workers)
 
     # Run rclip visual search in-process to get visual similarity scores
     from rclip.main import init_rclip
