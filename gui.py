@@ -88,7 +88,7 @@ class DuplicateFinderGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("AI Product Duplicate Finder")
-        self.root.geometry("820x700")
+        self.root.geometry("1020x700")
         
         # Main Layout Container
         main_frame = tk.Frame(root)
