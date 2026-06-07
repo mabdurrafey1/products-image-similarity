@@ -184,33 +184,48 @@ class DuplicateFinderGUI:
         form_card.columnconfigure(1, weight=1)
 
     def browse_image(self):
-        file_path = filedialog.askopenfilename(
-            title="Select Product Query Image",
+        file_paths = filedialog.askopenfilenames(
+            title="Select Product Query Image(s)",
             filetypes=[
                 ("Image Files", "*.png *.jpg *.jpeg *.webp *.gif *.avif *.heic *.bmp *.tif *.tiff"),
                 ("RAW Images", "*.cr2 *.nef *.arw *.dng *.orf *.rw2 *.pef *.x3f"),
                 ("All Files", "*.*")
             ]
         )
-        if file_path:
-            self.image_path_var.set(file_path)
+        if file_paths:
+            self.image_path_var.set(";".join(file_paths))
 
     def update_preview(self):
-        file_path = self.image_path_var.get().strip()
-        if not file_path or not os.path.exists(file_path):
+        paths_str = self.image_path_var.get().strip()
+        if not paths_str:
             self.preview_label.config(image="", text="No Image\nSelected", relief="groove")
+            self.preview_frame.config(text=" Image Preview ")
+            return
+            
+        paths = [p.strip() for p in paths_str.split(";") if p.strip()]
+        if not paths or not os.path.exists(paths[0]):
+            self.preview_label.config(image="", text="No Image\nSelected", relief="groove")
+            self.preview_frame.config(text=" Image Preview ")
             return
             
         try:
-            # Load and scale the image to fit in a 140x140 box
-            img = Image.open(file_path)
+            # Load and scale the first image to fit in a 140x140 box
+            first_path = paths[0]
+            img = Image.open(first_path)
             img.thumbnail((140, 140))
             
             # Convert to ImageTk PhotoImage
             self.photo = ImageTk.PhotoImage(img)
             self.preview_label.config(image=self.photo, text="", relief="flat")
+            
+            # Update frame title with count
+            if len(paths) > 1:
+                self.preview_frame.config(text=f" Image Preview ({len(paths)} selected) ")
+            else:
+                self.preview_frame.config(text=" Image Preview ")
         except Exception as e:
             self.preview_label.config(image="", text="Error\nLoading Preview", relief="groove")
+            self.preview_frame.config(text=" Image Preview ")
             print(f"Error loading preview: {e}")
 
     def open_last_results(self):
@@ -228,9 +243,12 @@ class DuplicateFinderGUI:
             messagebox.showerror("Error", "Please select a product query image first.")
             return
             
-        if not os.path.exists(query_image):
-            messagebox.showerror("Error", f"Selected image path does not exist:\n{query_image}")
-            return
+        # Verify each individual path exists
+        image_paths = [p.strip() for p in query_image.split(";") if p.strip()]
+        for p in image_paths:
+            if not os.path.exists(p):
+                messagebox.showerror("Error", f"Selected image path does not exist:\n{p}")
+                return
             
         # Disable inputs and clear log
         self.run_btn.config(state="disabled")

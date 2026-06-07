@@ -145,13 +145,15 @@ def resolve_reference_title(df, query_path, query_title, visual_scores=None):
         print(f"Baseline model reference specified by user: '{query_title}'\n")
         return query_title
         
-    # Try resolving reference title from query filename first if it corresponds to a dataset SKU
-    query_basename = os.path.splitext(os.path.basename(query_path))[0]
-    query_matching_rows = df[df['SKU'].astype(str) == query_basename]
-    if not query_matching_rows.empty:
-        reference_title = str(query_matching_rows.iloc[0].get('Title', ''))
-        print(f"Baseline model reference determined from query filename: '{reference_title}'\n")
-        return reference_title
+    # Split query_path to check multiple SKUs in case of multiple query images
+    query_list = [q.strip() for q in query_path.split(";") if q.strip()]
+    for q in query_list:
+        query_basename = os.path.splitext(os.path.basename(q))[0]
+        query_matching_rows = df[df['SKU'].astype(str) == query_basename]
+        if not query_matching_rows.empty:
+            reference_title = str(query_matching_rows.iloc[0].get('Title', ''))
+            print(f"Baseline model reference determined from query filename ({query_basename}): '{reference_title}'\n")
+            return reference_title
 
     # Fallback to the highest visual match title if not resolved yet
     if visual_scores:
@@ -168,9 +170,19 @@ def resolve_reference_title(df, query_path, query_title, visual_scores=None):
 def run_visual_search(image_dir, query_path, no_indexing=False):
     """Run rclip visual search in-process to get visual similarity scores."""
     from rclip.main import init_rclip
-    abs_query_path = os.path.abspath(query_path)
+    
+    # Split query_path by semicolon to support multiple reference images
+    query_list = [q.strip() for q in query_path.split(";") if q.strip()]
+    if not query_list:
+        print("Error: No valid query paths provided.")
+        return {}
+        
+    abs_query_paths = [os.path.abspath(q) for q in query_list]
+    primary_query = abs_query_paths[0]
+    positive_queries = abs_query_paths[1:]
+    
     visual_scores = {}
-    print("Querying AI model for visual similarity scores (in-process)...")
+    print(f"Querying AI model for visual similarity scores (in-process) using {len(abs_query_paths)} reference images...")
     try:
         rclip_instance, rclip_model, rclip_db = init_rclip(
             working_directory=os.path.abspath(image_dir),
@@ -179,9 +191,10 @@ def run_visual_search(image_dir, query_path, no_indexing=False):
         )
         try:
             search_results = rclip_instance.search(
-                query=abs_query_path,
+                query=primary_query,
                 directory=os.path.abspath(image_dir),
-                top_k=500
+                top_k=500,
+                positive_queries=positive_queries
             )
             for item in search_results:
                 filename = os.path.basename(item.filepath)
@@ -336,9 +349,12 @@ def main():
     parser.add_argument("--no-indexing", action="store_true", help="Skip checking/indexing images in the target directory")
     args = parser.parse_args()
 
-    if not os.path.exists(args.query):
-        print(f"Error: Query image '{args.query}' not found.")
-        return
+    # Verify each query path exists individually
+    query_paths = [q.strip() for q in args.query.split(";") if q.strip()]
+    for q in query_paths:
+        if not os.path.exists(q):
+            print(f"Error: Query image '{q}' not found.")
+            return
 
     # Check if input path exists, or try falling back to input_data folder
     input_path = args.input
