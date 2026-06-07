@@ -145,7 +145,11 @@ class DuplicateFinderGUI:
     def browse_image(self):
         file_path = filedialog.askopenfilename(
             title="Select Product Query Image",
-            filetypes=[("Image Files", "*.png *.jpg *.jpeg *.webp *.gif"), ("All Files", "*.*")]
+            filetypes=[
+                ("Image Files", "*.png *.jpg *.jpeg *.webp *.gif *.avif *.heic *.bmp *.tif *.tiff"),
+                ("RAW Images", "*.cr2 *.nef *.arw *.dng *.orf *.rw2 *.pef *.x3f"),
+                ("All Files", "*.*")
+            ]
         )
         if file_path:
             self.image_path_var.set(file_path)
