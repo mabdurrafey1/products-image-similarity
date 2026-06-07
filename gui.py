@@ -114,7 +114,7 @@ class DuplicateFinderGUI:
         self.preview_frame = tk.LabelFrame(form_card, text=" Image Preview ", font=("Segoe UI", 9, "bold"), padx=5, pady=5)
         self.preview_frame.grid(row=0, column=3, rowspan=3, padx=(20, 5), pady=5, sticky="nsew")
         
-        self.preview_label = tk.Label(self.preview_frame, text="No Image\nSelected", font=("Segoe UI", 9, "italic"), width=18, height=8, relief="dashed", bd=1)
+        self.preview_label = tk.Label(self.preview_frame, text="No Image\nSelected", font=("Segoe UI", 9, "italic"), width=18, height=8, relief="groove", bd=1)
         self.preview_label.pack(fill="both", expand=True)
         
         # Trace variable changes to automatically update preview
@@ -199,7 +199,7 @@ class DuplicateFinderGUI:
     def update_preview(self):
         file_path = self.image_path_var.get().strip()
         if not file_path or not os.path.exists(file_path):
-            self.preview_label.config(image="", text="No Image\nSelected", relief="dashed")
+            self.preview_label.config(image="", text="No Image\nSelected", relief="groove")
             return
             
         try:
@@ -211,7 +211,7 @@ class DuplicateFinderGUI:
             self.photo = ImageTk.PhotoImage(img)
             self.preview_label.config(image=self.photo, text="", relief="flat")
         except Exception as e:
-            self.preview_label.config(image="", text="Error\nLoading Preview", relief="dashed")
+            self.preview_label.config(image="", text="Error\nLoading Preview", relief="groove")
             print(f"Error loading preview: {e}")
 
     def open_last_results(self):
