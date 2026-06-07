@@ -21,6 +21,7 @@ import threading
 import webbrowser
 import match_image_ai
 import generate_report
+from PIL import Image, ImageTk
 
 import re
 
@@ -109,6 +110,16 @@ class DuplicateFinderGUI:
         browse_btn = tk.Button(form_card, text="Browse...", command=self.browse_image)
         browse_btn.grid(row=0, column=2, padx=5, pady=10)
         
+        # 1.5 Image Preview Panel (placed on the right side spanning rows 0, 1, 2)
+        self.preview_frame = tk.LabelFrame(form_card, text=" Image Preview ", font=("Segoe UI", 9, "bold"), padx=5, pady=5)
+        self.preview_frame.grid(row=0, column=3, rowspan=3, padx=(20, 5), pady=5, sticky="nsew")
+        
+        self.preview_label = tk.Label(self.preview_frame, text="No Image\nSelected", font=("Segoe UI", 9, "italic"), width=18, height=8, relief="dashed", bd=1)
+        self.preview_label.pack(fill="both", expand=True)
+        
+        # Trace variable changes to automatically update preview
+        self.image_path_var.trace_add("write", lambda *args: self.update_preview())
+        
         # 2. Query Title Row
         title_label = tk.Label(form_card, text="Query Title:")
         title_label.grid(row=1, column=0, sticky="nw", padx=5, pady=10)
@@ -184,6 +195,24 @@ class DuplicateFinderGUI:
         )
         if file_path:
             self.image_path_var.set(file_path)
+
+    def update_preview(self):
+        file_path = self.image_path_var.get().strip()
+        if not file_path or not os.path.exists(file_path):
+            self.preview_label.config(image="", text="No Image\nSelected", relief="dashed")
+            return
+            
+        try:
+            # Load and scale the image to fit in a 140x140 box
+            img = Image.open(file_path)
+            img.thumbnail((140, 140))
+            
+            # Convert to ImageTk PhotoImage
+            self.photo = ImageTk.PhotoImage(img)
+            self.preview_label.config(image=self.photo, text="", relief="flat")
+        except Exception as e:
+            self.preview_label.config(image="", text="Error\nLoading Preview", relief="dashed")
+            print(f"Error loading preview: {e}")
 
     def open_last_results(self):
         html_path = os.path.abspath("search_results.html")
