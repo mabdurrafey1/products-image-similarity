@@ -22,23 +22,54 @@ import webbrowser
 import match_image_ai
 import generate_report
 
+import re
+
 class CustomStdout:
-    def __init__(self, root, log_text, status_var):
+    def __init__(self, root, log_text, status_var, progress_bar):
         self.root = root
         self.log_text = log_text
         self.status_var = status_var
+        self.progress_bar = progress_bar
+        # Match something like " 50%|" or " 50/100" in tqdm progress line
+        self.pct_regex = re.compile(r'(\d+)%')
 
     def write(self, text):
         self.root.after(0, self._safe_write, text)
 
     def _safe_write(self, text):
+        # Check if this is a progress bar update line
+        # tqdm updates usually end with \r or contain progress bars (e.g. 50%|███)
+        is_progress = '\r' in text or '%' in text
+        
+        if is_progress:
+            # Try to extract percentage
+            match = self.pct_regex.search(text)
+            if match:
+                percentage = int(match.group(1))
+                # Switch progressbar to determinate mode and show progress
+                if self.progress_bar["mode"] != "determinate":
+                    self.progress_bar.config(mode="determinate")
+                self.progress_bar["value"] = percentage
+                self.status_var.set(f"Scanning & indexing images: {percentage}%...")
+            
+            # Print minimal progress info to log to avoid bloating the text box
+            # only if it contains actual stats and not just empty spaces
+            clean = text.replace('\r', '').strip()
+            if clean and ('%' in clean or 'it/s' in clean):
+                # We update the last line if possible, or just skip log-spam entirely to prevent freeze
+                pass
+            return
+
+        # Normal logs get written to the text widget
         self.log_text.insert(tk.END, text)
         self.log_text.see(tk.END)
         
         # Check text for status updates
         clean_line = text.strip()
         if clean_line:
-            if "Checking for missing images" in clean_line:
+            if "checking images in the current directory for changes" in clean_line.lower():
+                self.status_var.set("Scanning images for changes...")
+            elif "Checking for missing images" in clean_line:
                 self.status_var.set("Checking for missing database images...")
             elif "Starting download" in clean_line:
                 self.status_var.set("Downloading missing database images...")
@@ -207,7 +238,7 @@ class DuplicateFinderGUI:
             self.root.after(0, self.status_var.set, "Running AI visual search...")
             
             # Redirect stdout/stderr to the GUI log window
-            redirector = CustomStdout(self.root, self.log_text, self.status_var)
+            redirector = CustomStdout(self.root, self.log_text, self.status_var, self.progress)
             
             try:
                 sys.stdout = redirector
