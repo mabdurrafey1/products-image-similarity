@@ -88,7 +88,7 @@ class DuplicateFinderGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("AI Product Duplicate Finder")
-        self.root.geometry("1020x700")
+        self.root.geometry("850x700")
         
         # Main Layout Container
         main_frame = tk.Frame(root)
@@ -103,18 +103,19 @@ class DuplicateFinderGUI:
         image_label.grid(row=0, column=0, sticky="w", padx=5, pady=10)
         
         self.image_path_var = tk.StringVar()
-        image_entry = tk.Entry(form_card, textvariable=self.image_path_var, width=40)
-        image_entry.grid(row=0, column=1, padx=5, pady=10, sticky="we")
+        self.selected_images = []
+        self.preview_photos = []
+        
+        # Frame to hold the horizontal list of thumbnails
+        self.thumbnail_container = tk.Frame(form_card)
+        self.thumbnail_container.grid(row=0, column=1, padx=5, pady=10, sticky="w")
+        
+        # Placeholder label
+        self.placeholder_label = tk.Label(self.thumbnail_container, text="No images selected. Click Browse...", font=("Segoe UI", 9, "italic"), fg="gray")
+        self.placeholder_label.pack(side="left", padx=5)
         
         browse_btn = tk.Button(form_card, text="Browse...", command=self.browse_image)
         browse_btn.grid(row=0, column=2, padx=5, pady=10)
-        
-        # 1.5 Image Preview Panel (placed on the right side spanning rows 0, 1, 2)
-        self.preview_frame = tk.LabelFrame(form_card, text=" Image Preview ", font=("Segoe UI", 9, "bold"), padx=5, pady=5)
-        self.preview_frame.grid(row=0, column=3, rowspan=3, padx=(20, 5), pady=5, sticky="nsew")
-        
-        self.preview_label = tk.Label(self.preview_frame, text="No Image\nSelected", font=("Segoe UI", 9, "italic"), width=18, height=8, relief="groove", bd=1)
-        self.preview_label.pack(fill="both", expand=True)
         
         # Trace variable changes to automatically update preview
         self.image_path_var.trace_add("write", lambda *args: self.update_preview())
@@ -193,40 +194,60 @@ class DuplicateFinderGUI:
             ]
         )
         if file_paths:
-            self.image_path_var.set(";".join(file_paths))
+            for p in file_paths:
+                if p not in self.selected_images:
+                    self.selected_images.append(p)
+            self.image_path_var.set(";".join(self.selected_images))
 
     def update_preview(self):
+        # Clear existing widgets in the container
+        for widget in self.thumbnail_container.winfo_children():
+            widget.destroy()
+        self.preview_photos.clear()
+
+        # Read paths from trace variable
         paths_str = self.image_path_var.get().strip()
-        if not paths_str:
-            self.preview_label.config(image="", text="No Image\nSelected", relief="groove")
-            self.preview_frame.config(text=" Image Preview ")
-            return
-            
         paths = [p.strip() for p in paths_str.split(";") if p.strip()]
-        if not paths or not os.path.exists(paths[0]):
-            self.preview_label.config(image="", text="No Image\nSelected", relief="groove")
-            self.preview_frame.config(text=" Image Preview ")
+        self.selected_images = paths
+
+        if not paths:
+            self.placeholder_label = tk.Label(self.thumbnail_container, text="No images selected. Click Browse...", font=("Segoe UI", 9, "italic"), fg="gray")
+            self.placeholder_label.pack(side="left", padx=5)
             return
-            
-        try:
-            # Load and scale the first image to fit in a 140x140 box
-            first_path = paths[0]
-            img = Image.open(first_path)
-            img.thumbnail((140, 140))
-            
-            # Convert to ImageTk PhotoImage
-            self.photo = ImageTk.PhotoImage(img)
-            self.preview_label.config(image=self.photo, text="", relief="flat")
-            
-            # Update frame title with count
-            if len(paths) > 1:
-                self.preview_frame.config(text=f" Image Preview ({len(paths)} selected) ")
-            else:
-                self.preview_frame.config(text=" Image Preview ")
-        except Exception as e:
-            self.preview_label.config(image="", text="Error\nLoading Preview", relief="groove")
-            self.preview_frame.config(text=" Image Preview ")
-            print(f"Error loading preview: {e}")
+
+        for path in paths:
+            if not os.path.exists(path):
+                continue
+            try:
+                # Create a small container frame for each thumbnail
+                item_frame = tk.Frame(self.thumbnail_container, width=72, height=72, bg="#dcdcdc")
+                item_frame.pack_propagate(False)
+                item_frame.pack(side="left", padx=6)
+
+                # Resize image to fit inside the frame
+                img = Image.open(path)
+                img.thumbnail((62, 62))
+                photo = ImageTk.PhotoImage(img)
+                self.preview_photos.append(photo)
+
+                # Render image inside a label
+                img_label = tk.Label(item_frame, image=photo, bg="white")
+                img_label.pack(fill="both", expand=True, padx=1, pady=1)
+
+                # Close button on top-right of thumbnail (rendered on top of image label)
+                close_btn = tk.Label(
+                    img_label, text="×", bg="#ff4d4d", fg="white",
+                    font=("Segoe UI", 9, "bold"), cursor="hand2", bd=0
+                )
+                close_btn.bind("<Button-1>", lambda event, p=path: self.remove_image(p))
+                close_btn.place(x=44, y=2, width=16, height=16)
+            except Exception as e:
+                print(f"Error rendering thumbnail for {path}: {e}")
+
+    def remove_image(self, path):
+        if path in self.selected_images:
+            self.selected_images.remove(path)
+            self.image_path_var.set(";".join(self.selected_images))
 
     def open_last_results(self):
         html_path = os.path.abspath("search_results.html")
