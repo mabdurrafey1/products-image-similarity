@@ -51,7 +51,10 @@ class CustomStdout:
                 if self.progress_bar["mode"] != "determinate":
                     self.progress_bar.config(mode="determinate")
                 self.progress_bar["value"] = percentage
-                self.status_var.set(f"Scanning & indexing images: {percentage}%...")
+                if "download" in text.lower():
+                    self.status_var.set(f"Downloading images: {percentage}%...")
+                else:
+                    self.status_var.set(f"Scanning & indexing images: {percentage}%...")
             
             # Print minimal progress info to log to avoid bloating the text box
             # only if it contains actual stats and not just empty spaces

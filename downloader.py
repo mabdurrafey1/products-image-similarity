@@ -31,7 +31,13 @@ def download_missing_images(df, image_dir="downloaded_images", max_workers=30):
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
+        import threading
+        progress_lock = threading.Lock()
+        completed = 0
+        total = len(download_tasks)
+
         def download_single(task):
+            nonlocal completed
             sku, url, dest = task
             try:
                 r = requests.get(url, headers=headers, timeout=15)
@@ -47,6 +53,11 @@ def download_missing_images(df, image_dir="downloaded_images", max_workers=30):
                     print(f"Failed downloading SKU {sku}: status code {r.status_code}")
             except Exception as e:
                 print(f"Failed downloading SKU {sku}: {e}")
+            finally:
+                with progress_lock:
+                    completed += 1
+                    pct = int((completed / total) * 100)
+                    print(f"[Download Progress] {pct}% ({completed}/{total})", flush=True)
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             executor.map(download_single, download_tasks)
