@@ -198,7 +198,7 @@ def main():
             )
             for item in search_results:
                 filename = os.path.basename(item.filepath)
-                sku = os.path.splitext(filename)[0]
+                sku = os.path.splitext(filename)[0].strip().upper()
                 visual_scores[sku] = item.score
         finally:
             rclip_model.close()
@@ -238,7 +238,7 @@ def main():
         # Step 1: Pre-filter by quick keyword overlap and check if visual score is available to reduce candidates
         candidates = []
         for idx, row in df.iterrows():
-            sku = str(row.get('SKU', ''))
+            sku = str(row.get('SKU', '')).strip().upper()
             if sku not in visual_scores:
                 continue
             title = str(row.get('Title', ''))
@@ -277,7 +277,7 @@ def main():
                         })
             except Exception as e:
                 print(f"Warning: Error processing batch: {e}")
-
+ 
     # Second, assign visual scores and build merged results
     results_data = []
     if text_matches:
@@ -286,10 +286,11 @@ def main():
             row = match["row"]
             idx = match["idx"]
             semantic_sim = match["semantic_sim"]
-            sku = str(row.get('SKU', ''))
+            sku = str(row.get('SKU', '')).strip()
+            sku_lookup = sku.upper()
             
             # Look up score from rclip visual search
-            score = visual_scores.get(sku, None)
+            score = visual_scores.get(sku_lookup, None)
             if score is None:
                 continue
             
