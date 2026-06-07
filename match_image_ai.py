@@ -162,6 +162,34 @@ def main():
             reference_title = str(query_matching_rows.iloc[0].get('Title', ''))
             print(f"Baseline model reference determined from query filename: '{reference_title}'\n")
 
+    # Clean up empty or corrupted images in image_dir first
+    if os.path.exists(args.image_dir):
+        print("Verifying cached database images (removing empty or corrupted files)...")
+        corrupted_count = 0
+        from PIL import Image
+        for f in os.listdir(args.image_dir):
+            fpath = os.path.join(args.image_dir, f)
+            if not os.path.isfile(fpath) or f.startswith('.'):
+                continue
+            if os.path.getsize(fpath) == 0:
+                try:
+                    os.remove(fpath)
+                    corrupted_count += 1
+                except Exception:
+                    pass
+                continue
+            try:
+                with Image.open(fpath) as img:
+                    img.verify()
+            except Exception:
+                try:
+                    os.remove(fpath)
+                    corrupted_count += 1
+                except Exception:
+                    pass
+        if corrupted_count > 0:
+            print(f"Removed {corrupted_count} corrupted or empty images from cache.\n")
+
     # Automatically download missing images from dataset (filtered if reference_title is resolved)
     download_df = df
     if reference_title:
