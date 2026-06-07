@@ -28,11 +28,19 @@ def download_missing_images(df, image_dir="downloaded_images", max_workers=30):
             
     if download_tasks:
         print(f"Found {len(download_tasks)} missing images. Starting download using {max_workers} workers...")
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
         def download_single(task):
             sku, url, dest = task
             try:
-                r = requests.get(url, timeout=15)
+                r = requests.get(url, headers=headers, timeout=15)
                 if r.status_code == 200:
+                    # Check if the response is actually an image and not an HTML error page
+                    content_type = r.headers.get('Content-Type', '').lower()
+                    if 'html' in content_type:
+                        print(f"Failed downloading SKU {sku}: CDN returned HTML instead of image")
+                        return
                     with open(dest, 'wb') as f:
                         f.write(r.content)
                 else:
@@ -45,3 +53,4 @@ def download_missing_images(df, image_dir="downloaded_images", max_workers=30):
         print("Image download complete.\n")
     else:
         print("All database images are already cached locally.\n")
+
