@@ -150,7 +150,7 @@ class DuplicateFinderGUI:
         top_spinner = tk.Spinbox(settings_frame, from_=5, to=200, width=5, textvariable=self.top_var)
         top_spinner.pack(side="left", padx=5)
 
-        workers_lbl = tk.Label(settings_frame, text="Workers:")
+        workers_lbl = tk.Label(settings_frame, text="Download Workers:")
         workers_lbl.pack(side="left", padx=(10, 5))
 
         self.workers_var = tk.StringVar(value="30")
