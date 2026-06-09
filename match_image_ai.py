@@ -115,6 +115,65 @@ def clean_image_cache(image_dir):
     if corrupted_count > 0:
         print(f"Removed {corrupted_count} corrupted or empty images from cache.\n")
 
+def normalize_dataframe(df):
+    """Normalize column names from different Excel formats (old scrape format vs new report format)."""
+    mapping = {
+        'Input_SKU': 'SKU',
+        'Best_ZSKU': 'SKU',
+        'Standard_ZSKU': 'SKU',
+        
+        'Best_Title': 'Title',
+        'Standard_Title': 'Title',
+        
+        'Best_Price': 'Price',
+        'Standard_Price': 'Price',
+        
+        'Best_Main_Image_URL': 'Image URL',
+        'Standard_Main_Image_URL': 'Image URL'
+    }
+    
+    rename_dict = {}
+    assigned_targets = set(df.columns)
+    
+    # Process column mappings in order of preference to avoid duplicates
+    preferred_order = [
+        'Input_SKU', 'Best_ZSKU', 'Standard_ZSKU',
+        'Best_Title', 'Standard_Title',
+        'Best_Price', 'Standard_Price',
+        'Best_Main_Image_URL', 'Standard_Main_Image_URL'
+    ]
+    
+    for col in preferred_order:
+        if col in df.columns and col in mapping:
+            target = mapping[col]
+            if target not in assigned_targets:
+                rename_dict[col] = target
+                assigned_targets.add(target)
+                
+    if rename_dict:
+        df = df.rename(columns=rename_dict)
+    return df
+
+def load_excel_with_sheets(file_path):
+    """Load the Best_One_Row_Per_SKU sheet from an Excel file, falling back to default loading."""
+    try:
+        xls = pd.ExcelFile(file_path)
+        sheet_name = None
+        if 'Best_One_Row_Per_SKU' in xls.sheet_names:
+            sheet_name = 'Best_One_Row_Per_SKU'
+            
+        if sheet_name:
+            print(f"Detected multi-sheet Excel in '{os.path.basename(file_path)}'. Loading sheet: '{sheet_name}'")
+            df = pd.read_excel(xls, sheet_name=sheet_name)
+        else:
+            df = pd.read_excel(xls)
+        return normalize_dataframe(df)
+    except Exception as e:
+        print(f"Error reading Excel file '{file_path}': {e}")
+        # Fallback to direct reading
+        df = pd.read_excel(file_path)
+        return normalize_dataframe(df)
+
 def load_dataset(input_path):
     """Load dataset Excel files from a single file or a directory of files."""
     if os.path.isdir(input_path):
@@ -126,7 +185,7 @@ def load_dataset(input_path):
         dfs = []
         for f in sorted(excel_files):
             try:
-                temp_df = pd.read_excel(f)
+                temp_df = load_excel_with_sheets(f)
                 temp_df['Source File'] = os.path.basename(f)
                 dfs.append(temp_df)
             except Exception as e:
@@ -135,7 +194,7 @@ def load_dataset(input_path):
             raise ValueError(f"Could not load any Excel files from directory '{input_path}'")
         return pd.concat(dfs, ignore_index=True)
     else:
-        df = pd.read_excel(input_path)
+        df = load_excel_with_sheets(input_path)
         df['Source File'] = os.path.basename(input_path)
         return df
 
@@ -336,14 +395,14 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
 
 def main():
     parser = argparse.ArgumentParser(description="AI-powered duplicate listing search using rclip (CLIP).")
-    parser.add_argument("--query", required=True, help="Path to local query image")
-    parser.add_argument("--input", default="input_data", help="Dataset Excel path or directory containing Excel files (default: input_data)")
+    parser.add_argument("--query", default="/Users/mabdurrafey/Downloads/61ec5bb0-fe2c-4245-89fd-2f3e341e1e46.avif;/Users/mabdurrafey/Downloads/04429c3c-f63c-47a5-b709-06892999e7da.avif", help="Path to local query image (default: /Users/mabdurrafey/Downloads/61ec5bb0-fe2c-4245-89fd-2f3e341e1e46.avif;/Users/mabdurrafey/Downloads/04429c3c-f63c-47a5-b709-06892999e7da.avif)")
+    parser.add_argument("--input", default="input_data/somow_26971_sku_matched_noon_data.xlsx", help="Dataset Excel path or directory containing Excel files (default: input_data/somow_26971_sku_matched_noon_data.xlsx)")
     parser.add_argument("--output", default="search_results_ai.json", help="Path to save search results JSON")
     parser.add_argument("--top", type=int, default=10, help="Number of top visual matches to retrieve (default: 10)")
     parser.add_argument("--min-score", type=float, default=0.20, help="Minimum AI similarity score threshold (default: 0.20)")
     parser.add_argument("--min-text-sim", type=float, default=0.0, help="Minimum semantic text similarity score (default: 0.70, set to 0.0 to disable)")
     parser.add_argument("--strict", action="store_true", help="Enforce strict alphanumeric model code matching")
-    parser.add_argument("--query-title", default="", help="Pasted title text to use as reference baseline for semantic text similarity")
+    parser.add_argument("--query-title", default="Handheld Retro Game Console – 32GB TF Card, 6,000+ Preloaded Games, 11 Emulators, 3.5-Inch IPS Screen, Portable Retro Gaming Console for Classic Games Lovers", help="Pasted title text to use as reference baseline for semantic text similarity")
     parser.add_argument("--image-dir", default="downloaded_images", help="Directory where database images are stored")
     parser.add_argument("--workers", type=int, default=30, help="Number of download workers")
     parser.add_argument("--no-indexing", action="store_true", help="Skip checking/indexing images in the target directory")
@@ -386,13 +445,13 @@ def main():
     download_df = df
     if reference_title:
         print("Pre-filtering database to download images only for keyword-overlapping products...")
-        filtered_rows = []
+        matching_indices = []
         for idx, row in df.iterrows():
             title = str(row.get('Title', ''))
             if title and get_title_similarity(reference_title, title) > 0.0:
-                filtered_rows.append(row)
-        if filtered_rows:
-            download_df = pd.DataFrame(filtered_rows)
+                matching_indices.append(idx)
+        if matching_indices:
+            download_df = df.loc[matching_indices]
             print(f"Filtered download queue: {len(download_df)} products with keyword overlap (down from {len(df)} total).")
         else:
             print("Warning: No products found with keyword overlap. Downloading all missing images as fallback.")

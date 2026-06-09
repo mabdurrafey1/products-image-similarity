@@ -49,6 +49,7 @@ class CustomStdout:
                 percentage = int(match.group(1))
                 # Switch progressbar to determinate mode and show progress
                 if self.progress_bar["mode"] != "determinate":
+                    self.progress_bar.stop()
                     self.progress_bar.config(mode="determinate")
                 self.progress_bar["value"] = percentage
                 if "download" in text.lower():
@@ -105,8 +106,11 @@ class DuplicateFinderGUI:
         image_label = tk.Label(form_card, text="Query Image:")
         image_label.grid(row=0, column=0, sticky="w", padx=5, pady=10)
         
-        self.image_path_var = tk.StringVar()
-        self.selected_images = []
+        self.selected_images = [
+            "/Users/mabdurrafey/Downloads/61ec5bb0-fe2c-4245-89fd-2f3e341e1e46.avif",
+            "/Users/mabdurrafey/Downloads/04429c3c-f63c-47a5-b709-06892999e7da.avif"
+        ]
+        self.image_path_var = tk.StringVar(value=";".join(self.selected_images))
         self.preview_photos = []
         
         # Frame to hold the horizontal list of thumbnails
@@ -123,16 +127,20 @@ class DuplicateFinderGUI:
         # Trace variable changes to automatically update preview
         self.image_path_var.trace_add("write", lambda *args: self.update_preview())
         
+        # Trigger initial preview update for default images
+        self.update_preview()
+        
         # 2. Query Title Row
         title_label = tk.Label(form_card, text="Query Title:")
         title_label.grid(row=1, column=0, sticky="nw", padx=5, pady=10)
         
         self.title_text = tk.Text(form_card, height=3, width=40, font=("Segoe UI", 10))
         self.title_text.grid(row=1, column=1, columnspan=2, padx=5, pady=10, sticky="we")
+        self.title_text.insert("1.0", "Handheld Retro Game Console – 32GB TF Card, 6,000+ Preloaded Games, 11 Emulators, 3.5-Inch IPS Screen, Portable Retro Gaming Console for Classic Games Lovers")
         
-        # 3. Settings Row
+        # 4. Settings Row
         settings_frame = tk.Frame(form_card)
-        settings_frame.grid(row=2, column=0, columnspan=3, pady=10, sticky="w", padx=5)
+        settings_frame.grid(row=3, column=0, columnspan=3, pady=10, sticky="w", padx=5)
         
         self.strict_var = tk.BooleanVar(value=True)
         strict_cb = tk.Checkbutton(settings_frame, text="Enforce Strict Model Matching", variable=self.strict_var)
@@ -148,6 +156,13 @@ class DuplicateFinderGUI:
         self.top_var = tk.StringVar(value="50")
         top_spinner = tk.Spinbox(settings_frame, from_=5, to=200, width=5, textvariable=self.top_var)
         top_spinner.pack(side="left", padx=5)
+
+        workers_lbl = tk.Label(settings_frame, text="Workers:")
+        workers_lbl.pack(side="left", padx=(10, 5))
+
+        self.workers_var = tk.StringVar(value="30")
+        workers_spinner = tk.Spinbox(settings_frame, from_=1, to=100, width=5, textvariable=self.workers_var)
+        workers_spinner.pack(side="left", padx=5)
         
         # Progress Bar & Status Row
         self.progress_frame = tk.Frame(main_frame)
@@ -298,6 +313,7 @@ class DuplicateFinderGUI:
                 "match_image_ai.py",
                 "--query", image_path,
                 "--query-title", query_title,
+                "--workers", self.workers_var.get(),
                 "--top", self.top_var.get()
             ]
             if self.strict_var.get():

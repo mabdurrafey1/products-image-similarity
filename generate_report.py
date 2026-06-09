@@ -2,7 +2,65 @@ import json
 import os
 import pandas as pd
 
-def generate_html_report(json_path="search_results_ai.json", output_html="search_results.html", images_dir="downloaded_images"):
+def normalize_dataframe(df):
+    """Normalize column names from different Excel formats (old scrape format vs new report format)."""
+    mapping = {
+        'Input_SKU': 'SKU',
+        'Best_ZSKU': 'SKU',
+        'Standard_ZSKU': 'SKU',
+        
+        'Best_Title': 'Title',
+        'Standard_Title': 'Title',
+        
+        'Best_Price': 'Price',
+        'Standard_Price': 'Price',
+        
+        'Best_Main_Image_URL': 'Image URL',
+        'Standard_Main_Image_URL': 'Image URL'
+    }
+    
+    rename_dict = {}
+    assigned_targets = set(df.columns)
+    
+    # Process column mappings in order of preference to avoid duplicates
+    preferred_order = [
+        'Input_SKU', 'Best_ZSKU', 'Standard_ZSKU',
+        'Best_Title', 'Standard_Title',
+        'Best_Price', 'Standard_Price',
+        'Best_Main_Image_URL', 'Standard_Main_Image_URL'
+    ]
+    
+    for col in preferred_order:
+        if col in df.columns and col in mapping:
+            target = mapping[col]
+            if target not in assigned_targets:
+                rename_dict[col] = target
+                assigned_targets.add(target)
+                
+    if rename_dict:
+        df = df.rename(columns=rename_dict)
+    return df
+
+def load_excel_with_sheets(file_path):
+    """Load the Best_One_Row_Per_SKU sheet from an Excel file, falling back to default loading."""
+    try:
+        xls = pd.ExcelFile(file_path)
+        sheet_name = None
+        if 'Best_One_Row_Per_SKU' in xls.sheet_names:
+            sheet_name = 'Best_One_Row_Per_SKU'
+            
+        if sheet_name:
+            df = pd.read_excel(xls, sheet_name=sheet_name)
+        else:
+            df = pd.read_excel(xls)
+        return normalize_dataframe(df)
+    except Exception as e:
+        print(f"Error reading Excel file '{file_path}': {e}")
+        # Fallback to direct reading
+        df = pd.read_excel(file_path)
+        return normalize_dataframe(df)
+
+def generate_html_report(json_path="search_results_ai.json", output_html="search_results.html", images_dir="downloaded_images", excel_path="input_data/somow_26971_sku_matched_noon_data.xlsx"):
     if not os.path.exists(json_path):
         print(f"Error: JSON file '{json_path}' not found.")
         return
@@ -14,7 +72,7 @@ def generate_html_report(json_path="search_results_ai.json", output_html="search
     # mapping SKU -> extra columns
     extra_attrs = {}
     try:
-        df = pd.read_excel('combined_listings.xlsx')
+        df = load_excel_with_sheets(excel_path)
         # Identify columns other than basic ones
         standard_cols = {'SKU', 'Title', 'Price', 'Image URL', 'Source File'}
         extra_cols = [col for col in df.columns if col not in standard_cols]

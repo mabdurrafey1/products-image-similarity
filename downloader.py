@@ -57,7 +57,7 @@ def download_missing_images(df, image_dir="downloaded_images", max_workers=30):
                 with progress_lock:
                     completed += 1
                     pct = int((completed / total) * 100)
-                    print(f"[Download Progress] {pct}% ({completed}/{total})", flush=True)
+                    print(f"\r[Download Progress] {pct}% ({completed}/{total})", end="", flush=True)
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             executor.map(download_single, download_tasks)
