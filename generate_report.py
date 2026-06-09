@@ -60,7 +60,11 @@ def load_excel_with_sheets(file_path):
         df = pd.read_excel(file_path)
         return normalize_dataframe(df)
 
-def generate_html_report(json_path="search_results_ai.json", output_html="search_results.html", images_dir="downloaded_images", excel_path="input_data/somow_26971_sku_matched_noon_data.xlsx"):
+def generate_html_report(json_path="search_results_ai.json", output_html="search_results.html", images_dir="downloaded_images", excel_path=None):
+    if excel_path is None:
+        import glob
+        excel_files = sorted(glob.glob("input_data/*.xlsx"))
+        excel_path = excel_files[0] if excel_files else "combined_listings.xlsx"
     if not os.path.exists(json_path):
         print(f"Error: JSON file '{json_path}' not found.")
         return

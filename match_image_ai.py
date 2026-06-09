@@ -396,7 +396,11 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
 def main():
     parser = argparse.ArgumentParser(description="AI-powered duplicate listing search using rclip (CLIP).")
     parser.add_argument("--query", default="/Users/mabdurrafey/Downloads/61ec5bb0-fe2c-4245-89fd-2f3e341e1e46.avif;/Users/mabdurrafey/Downloads/04429c3c-f63c-47a5-b709-06892999e7da.avif", help="Path to local query image (default: /Users/mabdurrafey/Downloads/61ec5bb0-fe2c-4245-89fd-2f3e341e1e46.avif;/Users/mabdurrafey/Downloads/04429c3c-f63c-47a5-b709-06892999e7da.avif)")
-    parser.add_argument("--input", default="input_data/somow_26971_sku_matched_noon_data.xlsx", help="Dataset Excel path or directory containing Excel files (default: input_data/somow_26971_sku_matched_noon_data.xlsx)")
+    import glob
+    excel_files = sorted(glob.glob("input_data/*.xlsx"))
+    default_input = excel_files[0] if excel_files else "input_data"
+    
+    parser.add_argument("--input", default=default_input, help=f"Dataset Excel path or directory containing Excel files (default: {default_input})")
     parser.add_argument("--output", default="search_results_ai.json", help="Path to save search results JSON")
     parser.add_argument("--top", type=int, default=10, help="Number of top visual matches to retrieve (default: 10)")
     parser.add_argument("--min-score", type=float, default=0.20, help="Minimum AI similarity score threshold (default: 0.20)")
