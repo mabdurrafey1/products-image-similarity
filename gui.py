@@ -106,11 +106,8 @@ class DuplicateFinderGUI:
         image_label = tk.Label(form_card, text="Query Image:")
         image_label.grid(row=0, column=0, sticky="w", padx=5, pady=10)
         
-        self.selected_images = [
-            "/Users/mabdurrafey/Downloads/61ec5bb0-fe2c-4245-89fd-2f3e341e1e46.avif",
-            "/Users/mabdurrafey/Downloads/04429c3c-f63c-47a5-b709-06892999e7da.avif"
-        ]
-        self.image_path_var = tk.StringVar(value=";".join(self.selected_images))
+        self.image_path_var = tk.StringVar()
+        self.selected_images = []
         self.preview_photos = []
         
         # Frame to hold the horizontal list of thumbnails
@@ -127,16 +124,12 @@ class DuplicateFinderGUI:
         # Trace variable changes to automatically update preview
         self.image_path_var.trace_add("write", lambda *args: self.update_preview())
         
-        # Trigger initial preview update for default images
-        self.update_preview()
-        
         # 2. Query Title Row
         title_label = tk.Label(form_card, text="Query Title:")
         title_label.grid(row=1, column=0, sticky="nw", padx=5, pady=10)
         
         self.title_text = tk.Text(form_card, height=3, width=40, font=("Segoe UI", 10))
         self.title_text.grid(row=1, column=1, columnspan=2, padx=5, pady=10, sticky="we")
-        self.title_text.insert("1.0", "Handheld Retro Game Console – 32GB TF Card, 6,000+ Preloaded Games, 11 Emulators, 3.5-Inch IPS Screen, Portable Retro Gaming Console for Classic Games Lovers")
         
         # 4. Settings Row
         settings_frame = tk.Frame(form_card)
