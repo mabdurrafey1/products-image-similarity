@@ -406,7 +406,7 @@ def main():
     parser.add_argument("--min-score", type=float, default=0.20, help="Minimum AI similarity score threshold (default: 0.20)")
     parser.add_argument("--min-text-sim", type=float, default=0.0, help="Minimum semantic text similarity score (default: 0.70, set to 0.0 to disable)")
     parser.add_argument("--strict", action="store_true", help="Enforce strict alphanumeric model code matching")
-    parser.add_argument("--query-title", default="Handheld Retro Game Console – 32GB TF Card, 6,000+ Preloaded Games, 11 Emulators, 3.5-Inch IPS Screen, Portable Retro Gaming Console for Classic Games Lovers", help="Pasted title text to use as reference baseline for semantic text similarity")
+    parser.add_argument("--query-title", default="", help="Pasted title text to use as reference baseline for semantic text similarity")
     parser.add_argument("--image-dir", default="downloaded_images", help="Directory where database images are stored")
     parser.add_argument("--workers", type=int, default=30, help="Number of download workers")
     parser.add_argument("--no-indexing", action="store_true", help="Skip checking/indexing images in the target directory")
