@@ -628,15 +628,7 @@ def generate_html_report(json_path="search_results_ai.json", output_html="search
 
     <div class="app-layout">
         <aside class="sidebar">
-            <!-- VIEW MODE -->
-            <div class="sidebar-section">
-                <label class="sidebar-label">VIEW MODE</label>
-                <select class="sidebar-select" id="viewModeSelect" onchange="applyFilters()">
-                    <option value="all">Every SKU / No miss</option>
-                    <option value="has_price">With Price</option>
-                </select>
-                <p class="sidebar-subtext">Default me {total_matches} SKU alag card ban kar load hotay hain.</p>
-            </div>
+
             <!-- START / END PRICE -->
             <div class="sidebar-section">
                 <label class="sidebar-label">START / END PRICE</label>
@@ -894,7 +886,6 @@ def generate_html_report(json_path="search_results_ai.json", output_html="search
         function applyFilters() {
             const startPrice = parseFloat(document.getElementById('startPrice').value) || 0;
             const endPrice = parseFloat(document.getElementById('endPrice').value) || Infinity;
-            const viewMode = document.getElementById('viewModeSelect').value;
 
             const cards = document.querySelectorAll('.match-card');
             cards.forEach(card => {
@@ -906,11 +897,6 @@ def generate_html_report(json_path="search_results_ai.json", output_html="search
                 
                 // Price filter
                 if (price < startPrice || price > endPrice) {
-                    show = false;
-                }
-                
-                // View mode filter
-                if (viewMode === 'has_price' && price === 0) {
                     show = false;
                 }
 
