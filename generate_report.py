@@ -736,7 +736,7 @@ def generate_html_report(json_path="search_results_ai.json", output_html="search
                     <label>
                         <input type="checkbox" class="select-checkbox" data-sku="{sku}" data-zsku="{zsku}" onchange="updateSelection()"> Select
                     </label>
-                    <span style="font-size: 0.75rem; font-weight: 800; color: var(--color-blue); background: #eff6ff; padding: 2px 6px; border-radius: 4px;">#{item.get('Rank', rank)}</span>
+                    <span style="font-size: 0.75rem; font-weight: 800; color: var(--color-blue); background: #eff6ff; padding: 2px 6px; border-radius: 4px;">#{rank}</span>
                 </div>
 
                 <!-- Main Image -->
