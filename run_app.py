@@ -11,6 +11,8 @@ def main():
     parser.add_argument("--query-title", default="", help="Query Title text")
     parser.add_argument("--top", type=int, default=50, help="Number of top matches")
     parser.add_argument("--strict", action="store_true", help="Enable strict model filtering")
+    parser.add_argument("--min-price", type=float, default=None, help="Minimum product price threshold")
+    parser.add_argument("--max-price", type=float, default=None, help="Maximum product price threshold")
     args = parser.parse_args()
 
     # Determine command to run match_image_ai.py
@@ -28,6 +30,10 @@ def main():
     ]
     if args.strict:
         search_cmd.append("--strict")
+    if args.min_price is not None:
+        search_cmd.extend(["--min-price", str(args.min_price)])
+    if args.max_price is not None:
+        search_cmd.extend(["--max-price", str(args.max_price)])
 
     # Run the search
     try:

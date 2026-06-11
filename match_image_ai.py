@@ -410,6 +410,8 @@ def main():
     parser.add_argument("--image-dir", default="downloaded_images", help="Directory where database images are stored")
     parser.add_argument("--workers", type=int, default=30, help="Number of download workers")
     parser.add_argument("--no-indexing", action="store_true", help="Skip checking/indexing images in the target directory")
+    parser.add_argument("--min-price", type=float, default=None, help="Minimum product price threshold")
+    parser.add_argument("--max-price", type=float, default=None, help="Maximum product price threshold")
     args = parser.parse_args()
 
     # Verify each query path exists individually
@@ -438,6 +440,22 @@ def main():
     except Exception as e:
         print(f"Error loading dataset: {e}")
         return
+
+    # Filter by Price Range if specified
+    if (args.min_price is not None) or (args.max_price is not None):
+        if 'Price' in df.columns:
+            # Convert Price to numeric, forcing invalid parsing to NaN
+            df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
+            original_len = len(df)
+            if args.min_price is not None:
+                print(f"Filtering database: Min Price >= {args.min_price} AED")
+                df = df[df['Price'] >= args.min_price]
+            if args.max_price is not None:
+                print(f"Filtering database: Max Price <= {args.max_price} AED")
+                df = df[df['Price'] <= args.max_price]
+            print(f"Price filtering complete: kept {len(df)} of {original_len} products.")
+        else:
+            print("Warning: 'Price' column not found in dataset. Price filtering skipped.")
 
     # 2. Resolve query reference title for similarity checks
     reference_title = resolve_reference_title(df, args.query, args.query_title)

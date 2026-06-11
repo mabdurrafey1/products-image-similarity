@@ -117,6 +117,30 @@ class DuplicateFinderGUI:
         self.title_text = tk.Text(form_card, height=3, width=40, font=("Segoe UI", 10))
         self.title_text.grid(row=1, column=1, columnspan=2, padx=5, pady=10, sticky="we")
         
+        # 3. Price Range Row
+        price_label = tk.Label(form_card, text="Price Range:")
+        price_label.grid(row=2, column=0, sticky="w", padx=5, pady=10)
+        
+        price_frame = tk.Frame(form_card)
+        price_frame.grid(row=2, column=1, columnspan=2, sticky="w", padx=5, pady=10)
+        
+        min_lbl = tk.Label(price_frame, text="Min:")
+        min_lbl.pack(side="left", padx=2)
+        
+        self.min_price_var = tk.StringVar(value="")
+        min_entry = tk.Entry(price_frame, textvariable=self.min_price_var, width=10, font=("Segoe UI", 10))
+        min_entry.pack(side="left", padx=5)
+        
+        max_lbl = tk.Label(price_frame, text="Max:")
+        max_lbl.pack(side="left", padx=2)
+        
+        self.max_price_var = tk.StringVar(value="")
+        max_entry = tk.Entry(price_frame, textvariable=self.max_price_var, width=10, font=("Segoe UI", 10))
+        max_entry.pack(side="left", padx=5)
+        
+        aed_lbl = tk.Label(price_frame, text="AED", font=("Segoe UI", 9, "bold"))
+        aed_lbl.pack(side="left", padx=5)
+        
         # 4. Settings Row
         settings_frame = tk.Frame(form_card)
         settings_frame.grid(row=3, column=0, columnspan=3, pady=10, sticky="w", padx=5)
@@ -295,6 +319,13 @@ class DuplicateFinderGUI:
                 "--workers", self.workers_var.get(),
                 "--top", self.top_var.get()
             ]
+            
+            min_p = self.min_price_var.get().strip()
+            max_p = self.max_price_var.get().strip()
+            if min_p:
+                sys.argv.extend(["--min-price", min_p])
+            if max_p:
+                sys.argv.extend(["--max-price", max_p])
             if self.strict_var.get():
                 sys.argv.append("--strict")
             if self.no_indexing_var.get():
