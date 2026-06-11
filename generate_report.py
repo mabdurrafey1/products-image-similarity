@@ -73,6 +73,12 @@ def generate_html_report(json_path="search_results_ai.json", output_html="search
     with open(json_path, 'r', encoding='utf-8') as f:
         results = json.load(f)
 
+    # Sort results by price (ascending, N/A prices at the end)
+    results.sort(key=lambda x: (
+        x.get('Price') is None or pd.isna(x.get('Price')),
+        float(x.get('Price')) if x.get('Price') is not None and not pd.isna(x.get('Price')) else 0.0
+    ))
+
     prices = []
     for item in results:
         p = item.get('Price')
@@ -726,10 +732,11 @@ def generate_html_report(json_path="search_results_ai.json", output_html="search
         html_content += f"""
             <div class="match-card" data-sku="{sku}" data-zsku="{zsku}">
                 <!-- Checkbox Row -->
-                <div class="card-select-row">
+                <div class="card-select-row" style="display: flex; justify-content: space-between; align-items: center;">
                     <label>
                         <input type="checkbox" class="select-checkbox" data-sku="{sku}" data-zsku="{zsku}" onchange="updateSelection()"> Select
                     </label>
+                    <span style="font-size: 0.75rem; font-weight: 800; color: var(--color-blue); background: #eff6ff; padding: 2px 6px; border-radius: 4px;">#{item.get('Rank', rank)}</span>
                 </div>
 
                 <!-- Main Image -->
