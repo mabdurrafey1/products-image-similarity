@@ -252,7 +252,7 @@ def run_visual_search(image_dir, query_path, no_indexing=False):
             search_results = rclip_instance.search(
                 query=primary_query,
                 directory=os.path.abspath(image_dir),
-                top_k=500,
+                top_k=2000,
                 positive_queries=positive_queries
             )
             for item in search_results:
