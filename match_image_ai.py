@@ -301,7 +301,7 @@ def run_semantic_text_search(df, reference_title, visual_scores, min_text_sim, s
     print(f"Found {len(candidates)} candidate products with keyword overlap and visual score. Computing semantic similarity...")
     
     # Step 2: Batch compute text embeddings for candidates
-    threshold = min_text_sim if min_text_sim > 0.0 else 0.20
+    threshold = min_text_sim if min_text_sim > 0.0 else 0.50
     batch_size = 128
     for i in range(0, len(candidates), batch_size):
         batch_candidates = candidates[i:i+batch_size]
