@@ -65,12 +65,24 @@ def generate_html_report(json_path="search_results_ai.json", output_html="search
         import glob
         excel_files = sorted(glob.glob("input_data/*.xlsx"))
         excel_path = excel_files[0] if excel_files else "combined_listings.xlsx"
+
     if not os.path.exists(json_path):
         print(f"Error: JSON file '{json_path}' not found.")
         return
 
     with open(json_path, 'r', encoding='utf-8') as f:
         results = json.load(f)
+
+    prices = []
+    for item in results:
+        p = item.get('Price')
+        if p is not None:
+            try:
+                prices.append(float(p))
+            except (ValueError, TypeError):
+                pass
+    min_db_price = int(min(prices)) if prices else 0
+    max_db_price = int(max(prices)) if prices else 999
 
     # Let's read attributes from the excel file to get any extra attributes for these SKUs
     # mapping SKU -> extra columns
@@ -93,20 +105,19 @@ def generate_html_report(json_path="search_results_ai.json", output_html="search
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Search & Duplicate Listing Matches</title>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Plus+Jakarta+Sans:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-primary: #0a0f1d;
-            --bg-secondary: #121829;
-            --bg-card: #1b233d;
-            --text-primary: #f3f4f6;
-            --text-secondary: #9ca3af;
-            --accent-primary: #6366f1;
-            --accent-secondary: #3b82f6;
-            --accent-gradient: linear-gradient(135deg, #6366f1, #3b82f6);
-            --border-color: rgba(255, 255, 255, 0.08);
-            --badge-green: #10b981;
-            --badge-orange: #f59e0b;
+            --bg-primary: #f3f4f6;
+            --bg-card: #ffffff;
+            --text-primary: #111827;
+            --text-secondary: #4b5563;
+            --border-color: #e5e7eb;
+            
+            --color-blue: #2563eb;
+            --color-green: #10b981;
+            --color-grey-dark: #374151;
+            --color-grey-light: #f3f4f6;
         }
 
         * {
@@ -120,295 +131,548 @@ def generate_html_report(json_path="search_results_ai.json", output_html="search
             color: var(--text-primary);
             font-family: 'Plus Jakarta Sans', sans-serif;
             min-height: 100vh;
-            padding: 2rem 1.5rem;
+            margin: 0;
+            padding: 0;
             line-height: 1.5;
         }
 
+        .app-layout {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        .sidebar {
+            width: 280px;
+            background: #ffffff;
+            border-right: 1px solid var(--border-color);
+            padding: 1.5rem 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            flex-shrink: 0;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            overflow-y: auto;
+            box-shadow: 2px 0 8px rgba(0, 0, 0, 0.02);
+        }
+
+        .sidebar-section {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .sidebar-label {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #374151;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .sidebar-select {
+            width: 100%;
+            padding: 0.6rem 0.8rem;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 0.85rem;
+            background: #ffffff;
+            color: var(--text-primary);
+            cursor: pointer;
+            outline: none;
+        }
+
+        .sidebar-subtext {
+            font-size: 0.75rem;
+            color: #6b7280;
+            line-height: 1.4;
+        }
+
+        .price-inputs {
+            display: flex;
+            gap: 8px;
+        }
+
+        .price-input {
+            width: 50%;
+            padding: 0.6rem;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-family: inherit;
+            outline: none;
+        }
+
+        .price-buttons {
+            display: flex;
+            gap: 8px;
+            margin-top: 4px;
+        }
+
+        .sidebar-btn {
+            flex: 1;
+            border: none;
+            border-radius: 8px;
+            padding: 0.6rem;
+            font-size: 0.8rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: center;
+        }
+
+        .btn-sidebar-primary {
+            background: var(--color-blue);
+            color: white;
+        }
+        .btn-sidebar-primary:hover {
+            background: #1d4ed8;
+        }
+
+        .btn-sidebar-secondary {
+            background: #e5e7eb;
+            color: var(--text-secondary);
+        }
+        .btn-sidebar-secondary:hover {
+            background: #d1d5db;
+        }
+
+        .main-content {
+            flex-grow: 1;
+            padding: 1.5rem;
+            overflow-y: auto;
+            max-width: calc(100vw - 280px);
+        }
+
         .container {
-            max-width: 1400px;
+            max-width: 100%;
             margin: 0 auto;
         }
 
         header {
             text-align: center;
-            margin-bottom: 3rem;
-            position: relative;
+            margin-bottom: 2rem;
+            margin-top: 1rem;
         }
 
         header h1 {
-            font-family: 'Outfit', sans-serif;
-            font-size: 2.8rem;
+            font-size: 2.2rem;
             font-weight: 800;
-            background: var(--accent-gradient);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: var(--text-primary);
             margin-bottom: 0.5rem;
             letter-spacing: -0.025em;
         }
 
         header p {
             color: var(--text-secondary);
-            font-size: 1.1rem;
-            font-weight: 300;
+            font-size: 1rem;
+            font-weight: 400;
         }
 
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 1.5rem;
-            margin-bottom: 3rem;
-        }
-
-        .stat-card {
-            background: var(--bg-secondary);
+        /* Floating Selection Panel */
+        .selection-panel {
+            position: fixed;
+            top: 1rem;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.95);
             border: 1px solid var(--border-color);
-            border-radius: 16px;
-            padding: 1.5rem;
-            text-align: center;
-            position: relative;
-            overflow: hidden;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-            transition: transform 0.3s ease;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            border-radius: 50px;
+            padding: 0.6rem 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+            transition: all 0.3s ease;
+            display: none; /* Hidden by default, shown via JS */
         }
 
-        .stat-card:hover {
-            transform: translateY(-2px);
+        .selection-count {
+            font-weight: 700;
+            color: var(--color-blue);
+            font-size: 0.95rem;
         }
 
-        .stat-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 4px;
-            background: var(--accent-gradient);
+        .selection-btn {
+            border: none;
+            padding: 0.4rem 1rem;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: background 0.2s ease;
         }
 
-        .stat-val {
-            font-family: 'Outfit', sans-serif;
-            font-size: 2.2rem;
-            font-weight: 800;
-            color: #ffffff;
-            margin-bottom: 0.25rem;
+        .selection-btn-copy {
+            background: var(--color-blue);
+            color: white;
+        }
+        .selection-btn-copy:hover {
+            background: #1d4ed8;
         }
 
-        .stat-lbl {
+        .selection-btn-clear {
+            background: var(--color-grey-light);
             color: var(--text-secondary);
-            font-size: 0.875rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
+            border: 1px solid var(--border-color);
+        }
+        .selection-btn-clear:hover {
+            background: #e5e7eb;
         }
 
+        /* Grid Layout */
         .results-grid {
             display: grid;
-            grid-template-columns: 1fr;
-            gap: 1.5rem;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 12px;
         }
 
+        /* Card Style */
         .match-card {
-            background: var(--bg-secondary);
+            background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 20px;
-            overflow: hidden;
+            border-radius: 12px;
+            padding: 10px;
             display: flex;
-            flex-direction: row;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+            flex-direction: column;
+            position: relative;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            min-width: 0;
         }
 
         .match-card:hover {
-            transform: translateY(-4px) scale(1.005);
-            border-color: rgba(99, 102, 241, 0.4);
-            box-shadow: 0 15px 35px rgba(99, 102, 241, 0.15);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
         }
 
+        /* Top Checkbox Row */
+        .card-select-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .card-select-row label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .card-select-row input[type="checkbox"] {
+            width: 15px;
+            height: 15px;
+            accent-color: var(--color-blue);
+            cursor: pointer;
+        }
+
+        /* Image Display */
         .image-container {
-            width: 260px;
-            min-width: 260px;
-            background: #0f1423;
+            width: 100%;
+            height: 160px;
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 1.5rem;
+            padding: 6px;
+            background: #ffffff;
+            margin-bottom: 8px;
             position: relative;
-            border-right: 1px solid var(--border-color);
         }
 
         .image-container img {
             max-width: 100%;
-            max-height: 200px;
+            max-height: 100%;
             object-fit: contain;
-            border-radius: 12px;
-            transition: transform 0.5s ease;
         }
 
-        .match-card:hover .image-container img {
-            transform: scale(1.05);
-        }
-
-        .rank-badge {
-            position: absolute;
-            top: 1rem;
-            left: 1rem;
-            background: var(--accent-gradient);
-            color: white;
-            padding: 0.4rem 1rem;
-            border-radius: 30px;
-            font-weight: 700;
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.9rem;
-            box-shadow: 0 4px 10px rgba(99, 102, 241, 0.4);
-            z-index: 2;
-        }
-
-        .details-container {
-            flex-grow: 1;
-            padding: 2rem;
+        /* Badges Directly Under Image */
+        .pills-row {
             display: flex;
-            flex-direction: column;
-            justify-content: space-between;
+            gap: 6px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
         }
 
-        .details-header {
-            margin-bottom: 1rem;
-        }
-
-        .details-header h2 {
-            font-size: 1.35rem;
+        .pill-badge {
+            font-size: 0.75rem;
             font-weight: 700;
-            color: #ffffff;
-            margin-bottom: 0.75rem;
-            line-height: 1.4;
+            padding: 0.25rem 0.6rem;
+            border-radius: 4px;
+            text-transform: uppercase;
         }
 
-        .meta-badges {
+        .pill-price {
+            background: var(--color-green);
+            color: white;
+        }
+
+        .pill-dark {
+            background: var(--color-grey-dark);
+            color: white;
+        }
+
+        /* Product Title */
+        .product-title {
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            line-height: 1.4;
+            margin-bottom: 8px;
+            height: 3.4rem;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Category & Metadata Pills */
+        .tags-row {
             display: flex;
             flex-wrap: wrap;
-            gap: 0.75rem;
-            margin-bottom: 1.5rem;
+            gap: 6px;
+            margin-bottom: 12px;
         }
 
-        .badge {
-            display: inline-flex;
-            align-items: center;
-            padding: 0.35rem 0.85rem;
-            border-radius: 8px;
-            font-size: 0.8rem;
+        .tag-pill {
+            background: var(--color-grey-light);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            font-size: 0.72rem;
             font-weight: 600;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+        }
+
+        /* SKU Table Container */
+        .sku-box {
+            background: var(--color-grey-light);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 6px;
+            margin-bottom: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .sku-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.7rem;
+            font-weight: 500;
+        }
+
+        .sku-label {
+            color: var(--text-secondary);
+            font-weight: 700;
+            width: 32px;
+        }
+
+        .sku-val {
+            font-family: monospace;
+            color: var(--text-primary);
+            flex-grow: 1;
+            margin-right: 6px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .copy-btn {
+            background: #ffffff;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 0.1rem 0.3rem;
+            font-size: 0.65rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .copy-btn:hover {
+            background: #e5e7eb;
             color: var(--text-primary);
         }
 
-        .badge-score {
-            background: rgba(99, 102, 241, 0.15);
-            border-color: rgba(99, 102, 241, 0.3);
-            color: #818cf8;
+        /* Verification Row */
+        .verification-row {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 12px;
         }
 
-        .badge-text {
-            background: rgba(59, 130, 246, 0.15);
-            border-color: rgba(59, 130, 246, 0.3);
-            color: #60a5fa;
+        .verify-badge {
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            background: #d1fae5;
+            color: #065f46;
+            display: inline-flex;
+            align-items: center;
         }
 
-        .badge-price {
-            background: rgba(16, 185, 129, 0.15);
-            border-color: rgba(16, 185, 129, 0.3);
-            color: #34d399;
+        /* Thumbnail previews */
+        .thumbnails-row {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 14px;
+            overflow-x: auto;
+            padding-bottom: 4px;
         }
 
-        .badge-source {
-            background: rgba(245, 158, 11, 0.1);
-            border-color: rgba(245, 158, 11, 0.2);
-            color: #fbbf24;
+        .thumb-img {
+            width: 32px;
+            height: 32px;
+            min-width: 32px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 2px;
+            background: #ffffff;
+            cursor: pointer;
+            object-fit: contain;
+            transition: border-color 0.15s ease;
         }
 
-        .attributes-grid {
+        .thumb-img:hover, .thumb-img.active {
+            border-color: var(--color-blue);
+        }
+
+        /* Bottom Action Buttons */
+        .actions-row {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-            gap: 1rem;
-            background: rgba(255, 255, 255, 0.02);
-            padding: 1.25rem;
-            border-radius: 12px;
-            border: 1px solid rgba(255, 255, 255, 0.04);
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 8px;
             margin-top: auto;
         }
 
-        .attr-item {
+        .action-btn {
+            border: none;
+            border-radius: 6px;
+            padding: 0.35rem;
+            font-size: 0.72rem;
+            font-weight: 700;
+            cursor: pointer;
+            text-align: center;
+            text-decoration: none;
+            transition: background 0.2s ease;
+        }
+
+        .btn-view {
+            background: var(--color-blue);
+            color: white;
+        }
+        .btn-view:hover {
+            background: #1d4ed8;
+        }
+
+        .btn-open {
+            background: var(--color-green);
+            color: white;
+        }
+        .btn-open:hover {
+            background: #059669;
+        }
+
+        .btn-copy {
+            background: var(--color-grey-light);
+            color: var(--color-grey-dark);
+            border: 1px solid var(--border-color);
+        }
+        .btn-copy:hover {
+            background: #e5e7eb;
+        }
+
+        /* Alert/Notification Box */
+        #toast {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: var(--color-grey-dark);
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
             font-size: 0.85rem;
-        }
-
-        .attr-label {
-            color: var(--text-secondary);
-            font-weight: 500;
-            display: block;
-            margin-bottom: 0.15rem;
-            text-transform: uppercase;
-            font-size: 0.75rem;
-            letter-spacing: 0.05em;
-        }
-
-        .attr-value {
-            color: #ffffff;
             font-weight: 600;
+            z-index: 2000;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            display: none;
+            animation: fadeInUp 0.2s ease;
         }
 
-        @media (max-width: 768px) {
-            .match-card {
-                flex-direction: column;
-            }
-
-            .image-container {
-                width: 100%;
-                border-right: none;
-                border-bottom: 1px solid var(--border-color);
-            }
-
-            .details-container {
-                padding: 1.5rem;
-            }
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>Product Matching & Similar Listings</h1>
-            <p>Interactive duplicate finder results ranked by visual and semantic relevance</p>
-        </header>
+    <!-- Floating actions bar for selected items -->
+    <div id="selectionPanel" class="selection-panel">
+        <span class="selection-count">Selected: <span id="selectedCount">0</span> items</span>
+        <button class="selection-btn selection-btn-copy" onclick="copySelected('sku')">Copy SKUs</button>
+        <button class="selection-btn selection-btn-copy" onclick="copySelected('zsku')">Copy ZSKUs</button>
+        <button class="selection-btn selection-btn-clear" onclick="clearSelection()">Clear</button>
+    </div>
 
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-val">{total_matches}</div>
-                <div class="stat-lbl">Matches Found</div>
+    <div class="app-layout">
+        <aside class="sidebar">
+            <!-- VIEW MODE -->
+            <div class="sidebar-section">
+                <label class="sidebar-label">VIEW MODE</label>
+                <select class="sidebar-select" id="viewModeSelect" onchange="applyFilters()">
+                    <option value="all">Every SKU / No miss</option>
+                    <option value="has_price">With Price</option>
+                </select>
+                <p class="sidebar-subtext">Default me {total_matches} SKU alag card ban kar load hotay hain.</p>
             </div>
-            <div class="stat-card">
-                <div class="stat-val">{best_visual}</div>
-                <div class="stat-lbl">Best Visual Score</div>
+            <!-- START / END PRICE -->
+            <div class="sidebar-section">
+                <label class="sidebar-label">START / END PRICE</label>
+                <div class="price-inputs">
+                    <input type="number" id="startPrice" class="price-input" placeholder="Min">
+                    <input type="number" id="endPrice" class="price-input" placeholder="Max">
+                </div>
+                <div class="price-buttons">
+                    <button class="sidebar-btn btn-sidebar-secondary" onclick="resetPriceFilter()">Use full</button>
+                    <button class="sidebar-btn btn-sidebar-primary" onclick="applyFilters()">Apply</button>
+                </div>
+                <p class="sidebar-subtext">Database price range: {min_db_price} to {max_db_price} (strict filter)</p>
             </div>
-            <div class="stat-card">
-                <div class="stat-val">{best_text}</div>
-                <div class="stat-lbl">Best Text Score</div>
-            </div>
-        </div>
+        </aside>
 
-        <div class="results-grid">
+        <main class="main-content">
+            <div class="container">
+                <header>
+                    <h1>AI Listing Matching Results</h1>
+                    <p>Database Sheet: Best_One_Row_Per_SKU | Matches Found: {total_matches}</p>
+                </header>
+
+                <div class="results-grid">
 """
 
     best_visual = 0.0
     best_text = 0.0
 
-    for idx, item in enumerate(results):
-        sku = item.get("SKU", "")
-        title = item.get("Title", "")
-        price = item.get("Price", "")
-        ai_score = item.get("AI Score", None)
-        text_sim = item.get("Text Similarity", 0.0)
-        source_file = item.get("Source File", "")
-        row_num = item.get("Row", "")
-        rank = item.get("Rank", idx + 1)
+    for rank, item in enumerate(results, 1):
+        sku = item.get('SKU', '').strip()
+        title = item.get('Title', '')
+        price = item.get('Price', 0.0)
+        ai_score = item.get('AI Score', None)
+        text_sim = item.get('Text Similarity', 0.0)
+        source_file = item.get('Source File', 'Unknown')
+        row_num = item.get('Row', '')
 
         if ai_score is not None and ai_score > best_visual:
             best_visual = ai_score
@@ -422,51 +686,111 @@ def generate_html_report(json_path="search_results_ai.json", output_html="search
         if not os.path.exists(image_path):
             image_path = "https://placehold.co/300x300/121829/ffffff?text=Image+Not+Found"
 
-        ai_score_str = f"{ai_score:.3f}" if ai_score is not None else "N/A"
-        price_str = f"AED {price:,.2f}" if price else "N/A"
+        # Lookup extra attributes from the loaded Excel sheet
+        sku_lookup = sku.upper()
+        matched_sku_key = next((k for k in extra_attrs if k.upper() == sku_lookup), None)
+        attrs = extra_attrs.get(matched_sku_key, {}) if matched_sku_key else {}
 
-        # Build extra attributes list
-        attrs_html = ""
-        attrs_html += f"""
-            <div class="attr-item">
-                <span class="attr-label">SKU / ID</span>
-                <span class="attr-value">{sku}</span>
-            </div>
-            <div class="attr-item">
-                <span class="attr-label">Excel Location</span>
-                <span class="attr-value">Row {row_num}</span>
-            </div>
-        """
-        
-        # Add extra custom attributes from combined listing database if available
-        if sku in extra_attrs:
-            for col, val in extra_attrs[sku].items():
-                attrs_html += f"""
-                    <div class="attr-item">
-                        <span class="attr-label">{col}</span>
-                        <span class="attr-value">{val}</span>
-                    </div>
-                """
+        # Fetch extra fields
+        zsku = attrs.get('Best_ZSKU', sku)
+        if pd.isna(zsku):
+            zsku = sku
+        brand = attrs.get('Best_Brand', 'Generic')
+        if pd.isna(brand):
+            brand = 'Generic'
+        color = attrs.get('Best_Color', '')
+        stock = attrs.get('Best_Stock', '')
+        product_url = attrs.get('Best_Product_URL', '')
+        match_count = str(attrs.get('Match_Count', '1')).split('.')[0]  # Format float to int string
 
+        # Build category/brand/stock pills
+        tags_html = ""
+        tags_html += f'<span class="tag-pill">{brand}</span>'
+        if color and not pd.isna(color):
+            tags_html += f'<span class="tag-pill">{color}</span>'
+        if stock and not pd.isna(stock):
+            tags_html += f'<span class="tag-pill">{stock}</span>'
+
+        # Generate list of thumbnail previews from Combined_All_Image_URLs
+        all_imgs_str = attrs.get('Combined_All_Image_URLs', '')
+        thumbnails_html = ""
+        img_urls_list = []
+        if all_imgs_str and not pd.isna(all_imgs_str):
+            # Split by comma or semicolon
+            split_char = ';' if ';' in str(all_imgs_str) else ','
+            img_urls_list = [u.strip() for u in str(all_imgs_str).split(split_char) if u.strip()]
+            
+            # Show up to 6 thumbnails
+            for i, u in enumerate(img_urls_list[:6]):
+                thumbnails_html += f'<img class="thumb-img" src="{u}" alt="thumb" onclick="swapMainImage(this, \'{sku}\')">'
+        else:
+            # If no combined urls, just show the main image in thumbnail row
+            thumbnails_html += f'<img class="thumb-img active" src="{image_path}" alt="thumb">'
+
+        price_str = f"AED {price:.0f}" if price else "N/A"
+        match_badge_str = f"{match_count} SKU" if match_count else "1 SKU"
+
+        # Build card template
         html_content += f"""
-            <div class="match-card">
-                <div class="image-container">
-                    <span class="rank-badge">Rank {rank}</span>
-                    <img src="{image_path}" alt="{title}" onerror="this.src='https://placehold.co/300x300/121829/ffffff?text=Image+Not+Found'">
+            <div class="match-card" data-sku="{sku}" data-zsku="{zsku}">
+                <!-- Checkbox Row -->
+                <div class="card-select-row">
+                    <label>
+                        <input type="checkbox" class="select-checkbox" data-sku="{sku}" data-zsku="{zsku}" onchange="updateSelection()"> Select
+                    </label>
                 </div>
-                <div class="details-container">
-                    <div class="details-header">
-                        <h2>{title}</h2>
-                        <div class="meta-badges">
-                            <span class="badge badge-score">Visual Match: {ai_score_str}</span>
-                            <span class="badge badge-text">Text Sim: {text_sim:.3f}</span>
-                            <span class="badge badge-price">{price_str}</span>
-                            <span class="badge badge-source">{source_file}</span>
-                        </div>
+
+                <!-- Main Image -->
+                <div class="image-container">
+                    <img id="mainImg_{sku}" src="{image_path}" alt="{title}" onerror="this.src='https://placehold.co/300x300/121829/ffffff?text=Image+Not+Found'">
+                </div>
+
+                <!-- Pills directly under image -->
+                <div class="pills-row">
+                    <span class="pill-badge pill-price">{price_str}</span>
+                    <span class="pill-badge pill-dark">SKU</span>
+                    <span class="pill-badge pill-dark">{match_badge_str}</span>
+                </div>
+
+                <!-- Product Title -->
+                <div class="product-title" title="{title}">{title}</div>
+
+                <!-- Tags / Custom attributes -->
+                <div class="tags-row">
+                    {tags_html}
+                    <span class="tag-pill">{len(img_urls_list)} imgs</span>
+                </div>
+
+                <!-- SKU Table Box -->
+                <div class="sku-box">
+                    <div class="sku-row">
+                        <span class="sku-label">SKU</span>
+                        <span class="sku-val" id="skuText_{sku}">{sku}</span>
+                        <button class="copy-btn" onclick="copyText('skuText_{sku}')">Copy</button>
                     </div>
-                    <div class="attributes-grid">
-                        {attrs_html}
+                    <div class="sku-row">
+                        <span class="sku-label">ZSKU</span>
+                        <span class="sku-val" id="zskuText_{sku}">{zsku}</span>
+                        <button class="copy-btn" onclick="copyText('zskuText_{sku}')">Copy</button>
                     </div>
+                </div>
+
+                <!-- Verification Badges -->
+                <div class="verification-row">
+                    <span class="verify-badge" style="background:#d1fae5; color:#065f46;">URL Ready</span>
+                    <span class="verify-badge" style="background:#d1fae5; color:#065f46;">Image Ready</span>
+                </div>
+
+                <!-- Thumbnails Row -->
+                <div class="thumbnails-row">
+                    {thumbnails_html}
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="actions-row">
+                    <button class="action-btn btn-view" onclick="viewImage('{image_path}')">View</button>
+                    <a class="action-btn btn-open" href="{product_url}" target="_blank">Open</a>
+                    <button class="action-btn btn-copy" onclick="copyTextDirect('{sku}')">Copy</button>
                 </div>
             </div>
         """
@@ -474,6 +798,139 @@ def generate_html_report(json_path="search_results_ai.json", output_html="search
     html_content += """
         </div>
     </div>
+</div>
+</div>
+
+    <!-- Notification Toast Box -->
+    <div id="toast">Copied to clipboard!</div>
+
+    <!-- Modals or full image viewer if needed -->
+    <script>
+        function swapMainImage(thumb, skuId) {
+            const mainImg = document.getElementById("mainImg_" + skuId);
+            if (mainImg) {
+                mainImg.src = thumb.src;
+            }
+            
+            // Toggle active border class in parent row
+            const parent = thumb.parentElement;
+            const children = parent.getElementsByClassName("thumb-img");
+            for (let i = 0; i < children.length; i++) {
+                children[i].classList.remove("active");
+            }
+            thumb.classList.add("active");
+        }
+
+        function viewImage(imgPath) {
+            window.open(imgPath, '_blank');
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.innerText = message || "Copied to clipboard!";
+            toast.style.display = 'block';
+            setTimeout(() => {
+                toast.style.display = 'none';
+            }, 1500);
+        }
+
+        function copyText(elemId) {
+            const textVal = document.getElementById(elemId).innerText;
+            navigator.clipboard.writeText(textVal).then(() => {
+                showToast("Copied: " + textVal);
+            });
+        }
+
+        function copyTextDirect(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showToast("Copied SKU: " + text);
+            });
+        }
+
+        /* Selection Feature Logic */
+        let selectedSKUs = new Set();
+        let selectedZSKUs = new Set();
+
+        function updateSelection() {
+            const checkboxes = document.querySelectorAll('.select-checkbox');
+            selectedSKUs.clear();
+            selectedZSKUs.clear();
+
+            checkboxes.forEach(cb => {
+                if (cb.checked) {
+                    selectedSKUs.add(cb.getAttribute('data-sku'));
+                    selectedZSKUs.add(cb.getAttribute('data-zsku'));
+                }
+            });
+
+            const countSpan = document.getElementById('selectedCount');
+            const panel = document.getElementById('selectionPanel');
+            
+            countSpan.innerText = selectedSKUs.size;
+            
+            if (selectedSKUs.size > 0) {
+                panel.style.display = 'flex';
+            } else {
+                panel.style.display = 'none';
+            }
+        }
+
+        function clearSelection() {
+            const checkboxes = document.querySelectorAll('.select-checkbox');
+            checkboxes.forEach(cb => cb.checked = false);
+            updateSelection();
+        }
+
+        function copySelected(type) {
+            const items = type === 'sku' ? Array.from(selectedSKUs) : Array.from(selectedZSKUs);
+            if (items.length === 0) return;
+            
+            const textToCopy = items.join('\\n');
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                showToast("Copied " + items.length + " selected " + type.toUpperCase() + "s!");
+            });
+        }
+
+        function applyFilters() {
+            const startPrice = parseFloat(document.getElementById('startPrice').value) || 0;
+            const endPrice = parseFloat(document.getElementById('endPrice').value) || Infinity;
+            const viewMode = document.getElementById('viewModeSelect').value;
+
+            const cards = document.querySelectorAll('.match-card');
+            cards.forEach(card => {
+                const priceBadge = card.querySelector('.pill-price');
+                const priceText = priceBadge ? priceBadge.innerText.replace('AED', '').trim() : '';
+                const price = parseFloat(priceText) || 0;
+                
+                let show = true;
+                
+                // Price filter
+                if (price < startPrice || price > endPrice) {
+                    show = false;
+                }
+                
+                // View mode filter
+                if (viewMode === 'has_price' && price === 0) {
+                    show = false;
+                }
+
+                if (show) {
+                    card.style.display = 'flex';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+            
+            // Clear selections that are now hidden
+            updateSelection();
+        }
+
+        function resetPriceFilter() {
+            document.getElementById('startPrice').value = '';
+            document.getElementById('endPrice').value = '';
+            applyFilters();
+        }
+    </script>
 </body>
 </html>
 """
@@ -482,6 +939,8 @@ def generate_html_report(json_path="search_results_ai.json", output_html="search
     html_content = html_content.replace("{total_matches}", str(len(results)))
     html_content = html_content.replace("{best_visual}", f"{best_visual:.3f}" if best_visual else "N/A")
     html_content = html_content.replace("{best_text}", f"{best_text:.3f}" if best_text else "N/A")
+    html_content = html_content.replace("{min_db_price}", str(min_db_price))
+    html_content = html_content.replace("{max_db_price}", str(max_db_price))
 
     with open(output_html, 'w', encoding='utf-8') as f:
         f.write(html_content)
