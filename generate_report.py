@@ -73,10 +73,10 @@ def generate_html_report(json_path="search_results_ai.json", output_html="search
     with open(json_path, 'r', encoding='utf-8') as f:
         results = json.load(f)
 
-    # Sort results by price (ascending, N/A prices at the end)
+    # Sort results by price (descending, N/A prices at the end)
     results.sort(key=lambda x: (
         x.get('Price') is None or pd.isna(x.get('Price')),
-        float(x.get('Price')) if x.get('Price') is not None and not pd.isna(x.get('Price')) else 0.0
+        -float(x.get('Price')) if x.get('Price') is not None and not pd.isna(x.get('Price')) else 0.0
     ))
 
     prices = []
