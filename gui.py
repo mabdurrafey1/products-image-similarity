@@ -145,7 +145,7 @@ class DuplicateFinderGUI:
         settings_frame = tk.Frame(form_card)
         settings_frame.grid(row=3, column=0, columnspan=3, pady=10, sticky="w", padx=5)
         
-        self.strict_var = tk.BooleanVar(value=True)
+        self.strict_var = tk.BooleanVar(value=False)
         strict_cb = tk.Checkbutton(settings_frame, text="Enforce Strict Model Matching", variable=self.strict_var)
         strict_cb.pack(side="left", padx=5)
         
