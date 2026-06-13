@@ -167,22 +167,46 @@ class DuplicateFinderGUI:
         workers_spinner = tk.Spinbox(settings_frame, from_=1, to=100, width=5, textvariable=self.workers_var)
         workers_spinner.pack(side="left", padx=5)
 
-        # 5. Text Similarity Slider Row
-        sim_label = tk.Label(form_card, text="Text Match Threshold:")
+        # 5. Thresholds Row
+        sim_label = tk.Label(form_card, text="Match Thresholds:")
         sim_label.grid(row=4, column=0, sticky="w", padx=5, pady=10)
 
         sim_frame = tk.Frame(form_card)
         sim_frame.grid(row=4, column=1, columnspan=2, sticky="we", padx=5, pady=10)
 
-        self.text_sim_var = tk.DoubleVar(value=70.0) # default 70%
-        self.sim_value_lbl = tk.Label(sim_frame, text="70%", font=("Segoe UI", 9, "bold"), width=5)
+        # Text Match Threshold Sub-Frame (Left side)
+        text_frame = tk.Frame(sim_frame)
+        text_frame.pack(side="left", fill="x", expand=True, padx=(0, 15))
+
+        text_lbl = tk.Label(text_frame, text="Text:")
+        text_lbl.pack(side="left", padx=(0, 5))
+
+        self.text_sim_var = tk.DoubleVar(value=70.0)
+        self.sim_value_lbl = tk.Label(text_frame, text="70%", font=("Segoe UI", 9, "bold"), width=5)
 
         def update_sim_lbl(val):
             self.sim_value_lbl.config(text=f"{float(val):.0f}%")
 
-        self.sim_slider = ttk.Scale(sim_frame, from_=0.0, to=100.0, variable=self.text_sim_var, orient="horizontal", command=update_sim_lbl)
-        self.sim_slider.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        self.sim_slider = ttk.Scale(text_frame, from_=0.0, to=100.0, variable=self.text_sim_var, orient="horizontal", command=update_sim_lbl)
+        self.sim_slider.pack(side="left", fill="x", expand=True, padx=(0, 5))
         self.sim_value_lbl.pack(side="left")
+
+        # Image Match Threshold Sub-Frame (Right side)
+        img_frame = tk.Frame(sim_frame)
+        img_frame.pack(side="left", fill="x", expand=True)
+
+        img_lbl = tk.Label(img_frame, text="Image:")
+        img_lbl.pack(side="left", padx=(0, 5))
+
+        self.img_sim_var = tk.DoubleVar(value=0.20)
+        self.img_sim_value_lbl = tk.Label(img_frame, text="0.20", font=("Segoe UI", 9, "bold"), width=5)
+
+        def update_img_sim_lbl(val):
+            self.img_sim_value_lbl.config(text=f"{float(val):.2f}")
+
+        self.img_sim_slider = ttk.Scale(img_frame, from_=0.0, to=2.0, variable=self.img_sim_var, orient="horizontal", command=update_img_sim_lbl)
+        self.img_sim_slider.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.img_sim_value_lbl.pack(side="left")
         
         # Progress Bar & Status Row
         self.progress_frame = tk.Frame(main_frame)
@@ -335,7 +359,8 @@ class DuplicateFinderGUI:
                 "--query-title", query_title,
                 "--workers", self.workers_var.get(),
                 "--top", self.top_var.get(),
-                "--min-text-sim", f"{self.text_sim_var.get() / 100.0:.2f}"
+                "--min-text-sim", f"{self.text_sim_var.get() / 100.0:.2f}",
+                "--min-score", f"{self.img_sim_var.get():.2f}"
             ]
             
             min_p = self.min_price_var.get().strip()

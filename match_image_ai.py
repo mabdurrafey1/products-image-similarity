@@ -329,7 +329,7 @@ def run_semantic_text_search(df, reference_title, visual_scores, min_text_sim, s
             
     return text_matches
 
-def save_and_display_results(text_matches, visual_scores, output_path, top_limit):
+def save_and_display_results(text_matches, visual_scores, output_path, top_limit, min_score=0.20):
     """Format, sort, display, and save results to JSON."""
     results_data = []
     if text_matches:
@@ -343,7 +343,7 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
             
             # Look up score from rclip visual search
             score = visual_scores.get(sku_lookup, None)
-            if score is None:
+            if score is None or score < min_score:
                 continue
             
             price = row.get('Price', '')
@@ -497,7 +497,7 @@ def main():
         text_matches = run_semantic_text_search(df, reference_title, visual_scores, args.min_text_sim, args.strict)
 
     # 9. Format, sort, save and print results
-    save_and_display_results(text_matches, visual_scores, args.output, args.top)
+    save_and_display_results(text_matches, visual_scores, args.output, args.top, args.min_score)
 
 if __name__ == "__main__":
     main()
