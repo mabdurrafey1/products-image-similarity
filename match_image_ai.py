@@ -381,10 +381,13 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
             item["Combined Score"] = combined
             
             # Tier-based sorting:
-            # Tier 2 (high visual match, score >= 1.2): sorted strictly by visual score
-            # Tier 1 (lower visual match, score < 1.2): sorted by combined visual + text similarity
+            # Tier 3 (very high visual match, score >= 1.2): sorted strictly by visual score
+            # Tier 2 (very high text match, score >= 0.9): sorted strictly by text similarity
+            # Tier 1 (otherwise): sorted by combined visual + text similarity
             if vis >= 1.2:
-                item["Sort Key"] = (2, vis)
+                item["Sort Key"] = (3, vis)
+            elif text_sim >= 0.9:
+                item["Sort Key"] = (2, text_sim)
             else:
                 item["Sort Key"] = (1, combined)
 

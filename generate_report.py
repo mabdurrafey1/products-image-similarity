@@ -421,6 +421,16 @@ def generate_html_report(json_path="search_results_ai.json", output_html="search
             color: white;
         }
 
+        .pill-visual {
+            background: #6366f1;
+            color: white;
+        }
+
+        .pill-text {
+            background: #db2777;
+            color: white;
+        }
+
         /* Product Title */
         .product-title {
             font-size: 0.8rem;
@@ -732,6 +742,8 @@ def generate_html_report(json_path="search_results_ai.json", output_html="search
 
         price_str = f"AED {price:.0f}" if price else "N/A"
         match_badge_str = f"{match_count} SKU" if match_count else "1 SKU"
+        ai_score_str = f"VS: {ai_score:.2f}" if ai_score is not None else "VS: N/A"
+        text_sim_str = f"TX: {text_sim*100:.0f}%" if text_sim is not None else "TX: N/A"
 
         # Build card template
         html_content += f"""
@@ -752,7 +764,8 @@ def generate_html_report(json_path="search_results_ai.json", output_html="search
                 <!-- Pills directly under image -->
                 <div class="pills-row">
                     <span class="pill-badge pill-price">{price_str}</span>
-                    <span class="pill-badge pill-dark">SKU</span>
+                    <span class="pill-badge pill-visual">{ai_score_str}</span>
+                    <span class="pill-badge pill-text">{text_sim_str}</span>
                     <span class="pill-badge pill-dark">{match_badge_str}</span>
                 </div>
 
