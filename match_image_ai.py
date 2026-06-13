@@ -377,10 +377,19 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
             vis = item["AI Score"] if item["AI Score"] is not None else 0.0
             norm_vis = vis / max_visual
             text_sim = item["Text Similarity"]
-            item["Combined Score"] = (norm_vis * 0.5) + (text_sim * 0.5)
+            combined = (norm_vis * 0.5) + (text_sim * 0.5)
+            item["Combined Score"] = combined
+            
+            # Tier-based sorting:
+            # Tier 2 (high visual match, score >= 1.2): sorted strictly by visual score
+            # Tier 1 (lower visual match, score < 1.2): sorted by combined visual + text similarity
+            if vis >= 1.2:
+                item["Sort Key"] = (2, vis)
+            else:
+                item["Sort Key"] = (1, combined)
 
-        # Sort results descending by Combined Score
-        results_data.sort(key=lambda x: x["Combined Score"], reverse=True)
+        # Sort results descending by Sort Key tuple
+        results_data.sort(key=lambda x: x["Sort Key"], reverse=True)
         
         # Limit the results saved to the user's requested top_limit
         results_data = results_data[:top_limit]
