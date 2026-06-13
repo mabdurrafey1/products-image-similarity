@@ -372,6 +372,9 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
             reverse=True
         )
         
+        # Limit the results saved to the user's requested top_limit
+        results_data = results_data[:top_limit]
+        
         # Assign rank based on final sorted order
         for rank_idx, item in enumerate(results_data, 1):
             item["Rank"] = rank_idx
