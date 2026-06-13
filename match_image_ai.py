@@ -368,15 +368,20 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
                 "Image Filename": f"{sku}.jpg"
             })
             
-        # Calculate max visual score to normalize visual scores to [0, 1]
+        # Calculate max values to normalize both scores to [0, 1]
         max_visual = max(x["AI Score"] for x in results_data if x["AI Score"] is not None) if results_data else 1.0
         if max_visual <= 0:
             max_visual = 1.0
-
+            
+        max_text = max(x["Text Similarity"] for x in results_data if x["Text Similarity"] is not None) if results_data else 1.0
+        if max_text <= 0:
+            max_text = 1.0
+ 
         for item in results_data:
             vis = item["AI Score"] if item["AI Score"] is not None else 0.0
             norm_vis = vis / max_visual
-            text_sim = item["Text Similarity"]
+            text_sim = item["Text Similarity"] if item["Text Similarity"] is not None else 0.0
+            
             combined = (norm_vis * 0.5) + (text_sim * 0.5)
             item["Combined Score"] = combined
             
@@ -390,7 +395,7 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
                 item["Sort Key"] = (2, text_sim)
             else:
                 item["Sort Key"] = (1, combined)
-
+ 
         # Sort results descending by Sort Key tuple
         results_data.sort(key=lambda x: x["Sort Key"], reverse=True)
         
