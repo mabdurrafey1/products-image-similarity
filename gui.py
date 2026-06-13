@@ -166,6 +166,23 @@ class DuplicateFinderGUI:
         self.workers_var = tk.StringVar(value="30")
         workers_spinner = tk.Spinbox(settings_frame, from_=1, to=100, width=5, textvariable=self.workers_var)
         workers_spinner.pack(side="left", padx=5)
+
+        # 5. Text Similarity Slider Row
+        sim_label = tk.Label(form_card, text="Text Match Threshold:")
+        sim_label.grid(row=4, column=0, sticky="w", padx=5, pady=10)
+
+        sim_frame = tk.Frame(form_card)
+        sim_frame.grid(row=4, column=1, columnspan=2, sticky="we", padx=5, pady=10)
+
+        self.text_sim_var = tk.DoubleVar(value=70.0) # default 70%
+        self.sim_value_lbl = tk.Label(sim_frame, text="70%", font=("Segoe UI", 9, "bold"), width=5)
+
+        def update_sim_lbl(val):
+            self.sim_value_lbl.config(text=f"{float(val):.0f}%")
+
+        self.sim_slider = ttk.Scale(sim_frame, from_=0.0, to=100.0, variable=self.text_sim_var, orient="horizontal", command=update_sim_lbl)
+        self.sim_slider.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        self.sim_value_lbl.pack(side="left")
         
         # Progress Bar & Status Row
         self.progress_frame = tk.Frame(main_frame)
@@ -317,7 +334,8 @@ class DuplicateFinderGUI:
                 "--query", image_path,
                 "--query-title", query_title,
                 "--workers", self.workers_var.get(),
-                "--top", self.top_var.get()
+                "--top", self.top_var.get(),
+                "--min-text-sim", f"{self.text_sim_var.get() / 100.0:.2f}"
             ]
             
             min_p = self.min_price_var.get().strip()

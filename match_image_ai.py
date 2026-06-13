@@ -301,7 +301,7 @@ def run_semantic_text_search(df, reference_title, visual_scores, min_text_sim, s
     print(f"Found {len(candidates)} candidate products with keyword overlap and visual score. Computing semantic similarity...")
     
     # Step 2: Batch compute text embeddings for candidates
-    threshold = min_text_sim if min_text_sim > 0.0 else 0.50
+    threshold = min_text_sim if min_text_sim > 0.0 else 0.70
     batch_size = 128
     for i in range(0, len(candidates), batch_size):
         batch_candidates = candidates[i:i+batch_size]
@@ -407,7 +407,7 @@ def main():
     parser.add_argument("--output", default="search_results_ai.json", help="Path to save search results JSON")
     parser.add_argument("--top", type=int, default=500, help="Number of top visual matches to retrieve (default: 500)")
     parser.add_argument("--min-score", type=float, default=0.20, help="Minimum AI similarity score threshold (default: 0.20)")
-    parser.add_argument("--min-text-sim", type=float, default=0.0, help="Minimum semantic text similarity score (default: 0.70, set to 0.0 to disable)")
+    parser.add_argument("--min-text-sim", type=float, default=0.70, help="Minimum semantic text similarity score (default: 0.70, set to 0.0 to disable)")
     parser.add_argument("--strict", action="store_true", help="Enforce strict alphanumeric model code matching")
     parser.add_argument("--query-title", default="", help="Pasted title text to use as reference baseline for semantic text similarity")
     parser.add_argument("--image-dir", default="downloaded_images", help="Directory where database images are stored")
