@@ -16,6 +16,7 @@ def build():
     cmd = [
         py_exe, "-m", "PyInstaller",
         "--clean",
+        "-y",
         "--noconsole",
         "--name=AI_Product_Duplicate_Finder",
         "gui.py"
@@ -35,7 +36,7 @@ def build():
     if os.path.exists("dist"):
         for item in os.listdir("dist"):
             item_path = os.path.join("dist", item)
-            if os.path.isdir(item_path):
+            if os.path.isdir(item_path) and not item.endswith("_dist"):
                 target_dirs.append(item_path)
                 
     if not target_dirs:
@@ -56,8 +57,14 @@ def build():
         else:
             print("Warning: input_data folder not found, skipping.")
 
+    print("\n=== Step 3: Zipping the final distribution ===")
+    for dist_dir in target_dirs:
+        archive_base = dist_dir + "_dist"
+        print(f"Zipping {dist_dir} into {archive_base}.zip...")
+        shutil.make_archive(archive_base, 'zip', dist_dir)
+        print(f"Successfully created zip archive: {archive_base}.zip")
+
     print("\n=== Build Completed Successfully! ===")
-    print("You can now zip the folder(s) under the 'dist' directory and send it to the client.")
 
 if __name__ == "__main__":
     build()
