@@ -405,7 +405,7 @@ def main():
     
     parser.add_argument("--input", default=default_input, help=f"Dataset Excel path or directory containing Excel files (default: {default_input})")
     parser.add_argument("--output", default="search_results_ai.json", help="Path to save search results JSON")
-    parser.add_argument("--top", type=int, default=10, help="Number of top visual matches to retrieve (default: 10)")
+    parser.add_argument("--top", type=int, default=500, help="Number of top visual matches to retrieve (default: 500)")
     parser.add_argument("--min-score", type=float, default=0.20, help="Minimum AI similarity score threshold (default: 0.20)")
     parser.add_argument("--min-text-sim", type=float, default=0.0, help="Minimum semantic text similarity score (default: 0.70, set to 0.0 to disable)")
     parser.add_argument("--strict", action="store_true", help="Enforce strict alphanumeric model code matching")

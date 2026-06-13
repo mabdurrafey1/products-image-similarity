@@ -156,8 +156,8 @@ class DuplicateFinderGUI:
         top_lbl = tk.Label(settings_frame, text="Limit Matches:")
         top_lbl.pack(side="left", padx=(10, 5))
         
-        self.top_var = tk.StringVar(value="50")
-        top_spinner = tk.Spinbox(settings_frame, from_=5, to=200, width=5, textvariable=self.top_var)
+        self.top_var = tk.StringVar(value="500")
+        top_spinner = tk.Spinbox(settings_frame, from_=5, to=2000, width=5, textvariable=self.top_var)
         top_spinner.pack(side="left", padx=5)
 
         workers_lbl = tk.Label(settings_frame, text="Download Workers:")
