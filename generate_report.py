@@ -73,11 +73,6 @@ def generate_html_report(json_path="search_results_ai.json", output_html="search
     with open(json_path, 'r', encoding='utf-8') as f:
         results = json.load(f)
 
-    # Sort results by price (descending, N/A prices at the end)
-    results.sort(key=lambda x: (
-        x.get('Price') is None or pd.isna(x.get('Price')),
-        -float(x.get('Price')) if x.get('Price') is not None and not pd.isna(x.get('Price')) else 0.0
-    ))
 
     prices = []
     for item in results:
@@ -648,6 +643,16 @@ def generate_html_report(json_path="search_results_ai.json", output_html="search
                 </div>
                 <p class="sidebar-subtext">Database price range: {min_db_price} to {max_db_price} (strict filter)</p>
             </div>
+
+            <!-- SORT BY -->
+            <div class="sidebar-section">
+                <label class="sidebar-label">SORT BY</label>
+                <select id="sortBy" class="sidebar-select" onchange="applyFilters()">
+                    <option value="rank">Rank / AI Score</option>
+                    <option value="price-desc">Price: High to Low</option>
+                    <option value="price-asc">Price: Low to High</option>
+                </select>
+            </div>
         </aside>
 
         <main class="main-content">
@@ -730,7 +735,7 @@ def generate_html_report(json_path="search_results_ai.json", output_html="search
 
         # Build card template
         html_content += f"""
-            <div class="match-card" data-sku="{sku}" data-zsku="{zsku}">
+            <div class="match-card" data-sku="{sku}" data-zsku="{zsku}" data-rank="{rank}">
                 <!-- Checkbox Row -->
                 <div class="card-select-row" style="display: flex; justify-content: space-between; align-items: center;">
                     <label>
@@ -893,26 +898,64 @@ def generate_html_report(json_path="search_results_ai.json", output_html="search
         function applyFilters() {
             const startPrice = parseFloat(document.getElementById('startPrice').value) || 0;
             const endPrice = parseFloat(document.getElementById('endPrice').value) || Infinity;
+            const sortBy = document.getElementById('sortBy').value;
 
-            const cards = document.querySelectorAll('.match-card');
+            const grid = document.querySelector('.results-grid');
+            const cards = Array.from(document.querySelectorAll('.match-card'));
+
+            // 1. Filter visibility
             cards.forEach(card => {
                 const priceBadge = card.querySelector('.pill-price');
-                const priceText = priceBadge ? priceBadge.innerText.replace('AED', '').trim() : '';
+                const priceText = priceBadge ? priceBadge.innerText.replace('AED', '').replace('N/A', '').trim() : '';
                 const price = parseFloat(priceText) || 0;
                 
                 let show = true;
-                
-                // Price filter
                 if (price < startPrice || price > endPrice) {
                     show = false;
                 }
-
-                if (show) {
-                    card.style.display = 'flex';
-                } else {
-                    card.style.display = 'none';
-                }
+                card.style.display = show ? 'flex' : 'none';
             });
+
+            // 2. Sort card elements
+            cards.sort((a, b) => {
+                if (sortBy === 'rank') {
+                    const rankA = parseInt(a.getAttribute('data-rank')) || 9999;
+                    const rankB = parseInt(b.getAttribute('data-rank')) || 9999;
+                    return rankA - rankB;
+                } else if (sortBy === 'price-desc') {
+                    const priceBadgeA = a.querySelector('.pill-price');
+                    const priceBadgeB = b.querySelector('.pill-price');
+                    const priceA = priceBadgeA ? parseFloat(priceBadgeA.innerText.replace('AED', '').replace('N/A', '').trim()) : 0;
+                    const priceB = priceBadgeB ? parseFloat(priceBadgeB.innerText.replace('AED', '').replace('N/A', '').trim()) : 0;
+                    
+                    // Put N/A prices at the end
+                    const hasPriceA = !isNaN(priceA) && priceA > 0;
+                    const hasPriceB = !isNaN(priceB) && priceB > 0;
+                    if (!hasPriceA && hasPriceB) return 1;
+                    if (hasPriceA && !hasPriceB) return -1;
+                    if (!hasPriceA && !hasPriceB) return 0;
+                    
+                    return priceB - priceA;
+                } else if (sortBy === 'price-asc') {
+                    const priceBadgeA = a.querySelector('.pill-price');
+                    const priceBadgeB = b.querySelector('.pill-price');
+                    const priceA = priceBadgeA ? parseFloat(priceBadgeA.innerText.replace('AED', '').replace('N/A', '').trim()) : Infinity;
+                    const priceB = priceBadgeB ? parseFloat(priceBadgeB.innerText.replace('AED', '').replace('N/A', '').trim()) : Infinity;
+                    
+                    // Put N/A prices at the end
+                    const hasPriceA = !isNaN(priceA) && priceA !== Infinity;
+                    const hasPriceB = !isNaN(priceB) && priceB !== Infinity;
+                    if (!hasPriceA && hasPriceB) return 1;
+                    if (hasPriceA && !hasPriceB) return -1;
+                    if (!hasPriceA && !hasPriceB) return 0;
+                    
+                    return priceA - priceB;
+                }
+                return 0;
+            });
+
+            // 3. Re-append in sorted order
+            cards.forEach(card => grid.appendChild(card));
             
             // Clear selections that are now hidden
             updateSelection();
