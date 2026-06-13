@@ -16,24 +16,25 @@ def clean_title(title):
     t = t.replace("rearviewmirror", "rearview mirror")
     return t
 
+def extract_models(text):
+    """Extract alphanumeric model identifiers (e.g., X6, D007, R36S)."""
+    words = re.findall(r'\b[a-z0-9-]+\b', text)
+    models = set()
+    for w in words:
+        if w.isdigit():
+            continue
+        has_digit = any(c.isdigit() for c in w)
+        has_alpha = any(c.isalpha() for c in w)
+        if has_digit and has_alpha:
+            models.add(w)
+    return models
+
 def is_generic_mismatch(title_a, title_b):
     """Check if there is a generic model or category mismatch between two product titles."""
     t_a = clean_title(title_a)
     t_b = clean_title(title_b)
     
     # 1. Alphanumeric model identifier mismatch (e.g., X6 vs D007 vs R36S vs M21)
-    def extract_models(text):
-        words = re.findall(r'\b[a-z0-9-]+\b', text)
-        models = set()
-        for w in words:
-            if w.isdigit():
-                continue
-            has_digit = any(c.isdigit() for c in w)
-            has_alpha = any(c.isalpha() for c in w)
-            if has_digit and has_alpha:
-                models.add(w)
-        return models
-
     models_a = extract_models(t_a)
     models_b = extract_models(t_b)
     if models_a and models_b:
@@ -300,6 +301,9 @@ def run_semantic_text_search(df, reference_title, visual_scores, min_text_sim, s
     
     print(f"Found {len(candidates)} candidate products with keyword overlap and visual score. Computing semantic similarity...")
     
+    # Pre-extract model codes from the query reference
+    query_models = extract_models(clean_title(reference_title))
+
     # Step 2: Batch compute text embeddings for candidates
     threshold = min_text_sim if min_text_sim > 0.0 else 0.70
     batch_size = 128
@@ -311,10 +315,14 @@ def run_semantic_text_search(df, reference_title, visual_scores, min_text_sim, s
             batch_embs = clip_model.compute_text_features(batch_titles)
             for j, emb in enumerate(batch_embs):
                 semantic_sim = float(ref_emb @ emb.T)
+                idx, row, title = batch_candidates[j]
                 
-                if semantic_sim >= threshold:
-                    idx, row, title = batch_candidates[j]
-                    
+                # Check for exact model code overlap (Idea 1)
+                candidate_models = extract_models(clean_title(title))
+                model_match = bool(query_models.intersection(candidate_models))
+                
+                # Keep if semantic sim is high OR if it is an exact model match
+                if semantic_sim >= threshold or model_match:
                     # Apply strict model check if enabled
                     if strict and is_generic_mismatch(reference_title, title):
                         continue
@@ -360,17 +368,19 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
                 "Image Filename": f"{sku}.jpg"
             })
             
-        # Sort results:
-        # 1. Products with visual scores (AI Score is not None) sorted descending by AI Score.
-        # 2. Products without visual scores (AI Score is None) sorted descending by Text Similarity.
-        results_data.sort(
-            key=lambda x: (
-                0 if x["AI Score"] is None else 1, 
-                x["AI Score"] if x["AI Score"] is not None else 0.0, 
-                x["Text Similarity"]
-            ),
-            reverse=True
-        )
+        # Calculate max visual score to normalize visual scores to [0, 1]
+        max_visual = max(x["AI Score"] for x in results_data if x["AI Score"] is not None) if results_data else 1.0
+        if max_visual <= 0:
+            max_visual = 1.0
+
+        for item in results_data:
+            vis = item["AI Score"] if item["AI Score"] is not None else 0.0
+            norm_vis = vis / max_visual
+            text_sim = item["Text Similarity"]
+            item["Combined Score"] = (norm_vis * 0.5) + (text_sim * 0.5)
+
+        # Sort results descending by Combined Score
+        results_data.sort(key=lambda x: x["Combined Score"], reverse=True)
         
         # Limit the results saved to the user's requested top_limit
         results_data = results_data[:top_limit]
@@ -497,7 +507,10 @@ def main():
         text_matches = run_semantic_text_search(df, reference_title, visual_scores, args.min_text_sim, args.strict)
 
     # 9. Format, sort, save and print results
-    save_and_display_results(text_matches, visual_scores, args.output, args.top, args.min_score)
+    max_score = max(visual_scores.values()) if visual_scores else 0.0
+    dynamic_min_score = max(args.min_score, max_score - 0.45)
+    print(f"Top visual score: {max_score:.3f} | Dynamic visual threshold: {dynamic_min_score:.3f}")
+    save_and_display_results(text_matches, visual_scores, args.output, args.top, dynamic_min_score)
 
 if __name__ == "__main__":
     main()
