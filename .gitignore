@@ -13,3 +13,4 @@ build/
 dist/
 *.spec
 skills-lock.json
+temp
