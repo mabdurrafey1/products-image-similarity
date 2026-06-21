@@ -78,7 +78,7 @@ class DuplicateFinderGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("AI Product Duplicate Finder")
-        self.root.geometry("850x700")
+        self.root.geometry("1100x700")
         
         # Main Layout Container
         main_frame = tk.Frame(root)
@@ -117,12 +117,26 @@ class DuplicateFinderGUI:
         self.title_text = tk.Text(form_card, height=3, width=40, font=("Segoe UI", 10))
         self.title_text.grid(row=1, column=1, columnspan=2, padx=5, pady=10, sticky="we")
         
-        # 3. Price Range Row
+        # 3. Input Source Row
+        source_label = tk.Label(form_card, text="Input Source:")
+        source_label.grid(row=2, column=0, sticky="w", padx=5, pady=10)
+        
+        import glob
+        excel_files = sorted(glob.glob("input_data/*.xlsx"))
+        self.excel_options = [os.path.basename(f) for f in excel_files]
+        if not self.excel_options:
+            self.excel_options = ["(No Excel files found)"]
+            
+        self.selected_excel_var = tk.StringVar(value=self.excel_options[0])
+        self.source_dropdown = ttk.Combobox(form_card, textvariable=self.selected_excel_var, values=self.excel_options, state="readonly", width=40)
+        self.source_dropdown.grid(row=2, column=1, columnspan=2, padx=5, pady=10, sticky="w")
+        
+        # 4. Price Range Row
         price_label = tk.Label(form_card, text="Price Range:")
-        price_label.grid(row=2, column=0, sticky="w", padx=5, pady=10)
+        price_label.grid(row=3, column=0, sticky="w", padx=5, pady=10)
         
         price_frame = tk.Frame(form_card)
-        price_frame.grid(row=2, column=1, columnspan=2, sticky="w", padx=5, pady=10)
+        price_frame.grid(row=3, column=1, columnspan=2, sticky="w", padx=5, pady=10)
         
         min_lbl = tk.Label(price_frame, text="Min:")
         min_lbl.pack(side="left", padx=2)
@@ -141,9 +155,9 @@ class DuplicateFinderGUI:
         aed_lbl = tk.Label(price_frame, text="AED", font=("Segoe UI", 9, "bold"))
         aed_lbl.pack(side="left", padx=5)
         
-        # 4. Settings Row
+        # 5. Settings Row
         settings_frame = tk.Frame(form_card)
-        settings_frame.grid(row=3, column=0, columnspan=3, pady=10, sticky="w", padx=5)
+        settings_frame.grid(row=4, column=0, columnspan=3, pady=10, sticky="w", padx=5)
         
         self.strict_var = tk.BooleanVar(value=False)
         strict_cb = tk.Checkbutton(settings_frame, text="Enforce Strict Model Matching", variable=self.strict_var)
@@ -167,12 +181,12 @@ class DuplicateFinderGUI:
         workers_spinner = tk.Spinbox(settings_frame, from_=1, to=100, width=5, textvariable=self.workers_var)
         workers_spinner.pack(side="left", padx=5)
 
-        # 5. Thresholds Row
+        # 6. Thresholds Row
         sim_label = tk.Label(form_card, text="Match Thresholds:")
-        sim_label.grid(row=4, column=0, sticky="w", padx=5, pady=10)
+        sim_label.grid(row=5, column=0, sticky="w", padx=5, pady=10)
 
         sim_frame = tk.Frame(form_card)
-        sim_frame.grid(row=4, column=1, columnspan=2, sticky="we", padx=5, pady=10)
+        sim_frame.grid(row=5, column=1, columnspan=2, sticky="we", padx=5, pady=10)
 
         # Text Match Threshold Sub-Frame (Left side)
         text_frame = tk.Frame(sim_frame)
@@ -351,12 +365,15 @@ class DuplicateFinderGUI:
 
     def run_matching_search(self, image_path, query_title):
         try:
-            # Set up command line arguments for match_image_ai
+            selected_excel_name = self.selected_excel_var.get().strip()
+            excel_path = os.path.join("input_data", selected_excel_name)
+            
             old_argv = sys.argv
             sys.argv = [
                 "match_image_ai.py",
                 "--query", image_path,
                 "--query-title", query_title,
+                "--input", excel_path,
                 "--workers", self.workers_var.get(),
                 "--top", self.top_var.get(),
                 "--min-text-sim", f"{self.text_sim_var.get() / 100.0:.2f}",
@@ -390,7 +407,7 @@ class DuplicateFinderGUI:
                 self.root.after(0, self.status_var.set, "Compiling search matches into HTML dashboard...")
                 self.root.after(0, self.append_log, "Generating search_results.html report...\n")
                 
-                generate_report.generate_html_report()
+                generate_report.generate_html_report(excel_path=excel_path)
             finally:
                 sys.argv = old_argv
                 sys.stdout = sys.__stdout__
