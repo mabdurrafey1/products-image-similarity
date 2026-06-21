@@ -60,7 +60,7 @@ def load_excel_with_sheets(file_path):
         df = pd.read_excel(file_path)
         return normalize_dataframe(df)
 
-def generate_html_report(json_path="search_results_ai.json", output_html="search_results.html", images_dir="downloaded_images", excel_path=None):
+def generate_html_report(json_path="temp/search_results_ai.json", output_html="temp/search_results.html", images_dir="downloaded_images", excel_path=None):
     if excel_path is None:
         import glob
         excel_files = sorted(glob.glob("input_data/*.xlsx"))

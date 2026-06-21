@@ -26,6 +26,7 @@ def main():
         sys.executable, match_script,
         "--query", args.query,
         "--query-title", args.query_title,
+        "--output", "temp/search_results_ai.json",
         "--top", str(args.top)
     ]
     if args.strict:
@@ -50,12 +51,12 @@ def main():
         sys.exit(1)
 
     # Open HTML page in default browser
-    html_path = os.path.abspath("search_results.html")
+    html_path = os.path.abspath("temp/search_results.html")
     if os.path.exists(html_path):
         print(f"Opening report: {html_path}")
         webbrowser.open(f"file:///{html_path}")
     else:
-        print("Error: search_results.html was not generated.")
+        print("Error: temp/search_results.html was not generated.")
 
 if __name__ == "__main__":
     main()

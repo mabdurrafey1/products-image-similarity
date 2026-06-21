@@ -12,3 +12,4 @@ run_gui.bat
 build/
 dist/
 *.spec
+skills-lock.json

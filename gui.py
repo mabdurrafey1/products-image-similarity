@@ -326,11 +326,11 @@ class DuplicateFinderGUI:
             self.image_path_var.set(";".join(self.selected_images))
 
     def open_last_results(self):
-        html_path = os.path.abspath("search_results.html")
+        html_path = os.path.abspath("temp/search_results.html")
         if os.path.exists(html_path):
             webbrowser.open(f"file:///{html_path}")
         else:
-            messagebox.showwarning("No Results", "No generated search_results.html file was found. Run a search first.")
+            messagebox.showwarning("No Results", "No generated temp/search_results.html file was found. Run a search first.")
 
     def start_matching_thread(self):
         query_image = self.image_path_var.get().strip()
@@ -365,6 +365,9 @@ class DuplicateFinderGUI:
 
     def run_matching_search(self, image_path, query_title):
         try:
+            # Create temp directory if it doesn't exist
+            os.makedirs("temp", exist_ok=True)
+            
             selected_excel_name = self.selected_excel_var.get().strip()
             excel_path = os.path.join("input_data", selected_excel_name)
             
@@ -374,6 +377,7 @@ class DuplicateFinderGUI:
                 "--query", image_path,
                 "--query-title", query_title,
                 "--input", excel_path,
+                "--output", "temp/search_results_ai.json",
                 "--workers", self.workers_var.get(),
                 "--top", self.top_var.get(),
                 "--min-text-sim", f"{self.text_sim_var.get() / 100.0:.2f}",
@@ -405,9 +409,13 @@ class DuplicateFinderGUI:
                 
                 # Execute generate_report html generator
                 self.root.after(0, self.status_var.set, "Compiling search matches into HTML dashboard...")
-                self.root.after(0, self.append_log, "Generating search_results.html report...\n")
+                self.root.after(0, self.append_log, "Generating temp/search_results.html report...\n")
                 
-                generate_report.generate_html_report(excel_path=excel_path)
+                generate_report.generate_html_report(
+                    json_path="temp/search_results_ai.json",
+                    output_html="temp/search_results.html",
+                    excel_path=excel_path
+                )
             finally:
                 sys.argv = old_argv
                 sys.stdout = sys.__stdout__
@@ -422,7 +430,7 @@ class DuplicateFinderGUI:
     def on_search_success(self):
         self.progress.stop()
         self.run_btn.config(state="normal")
-        self.status_var.set("Search complete! Matches saved to search_results.html")
+        self.status_var.set("Search complete! Matches saved to temp/search_results.html")
         self.append_log("\n[SUCCESS] AI Duplicate Finder completed successfully.\n")
         
         # Prompt to show results

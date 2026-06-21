@@ -431,7 +431,7 @@ def main():
     default_input = excel_files[0] if excel_files else "input_data"
     
     parser.add_argument("--input", default=default_input, help=f"Dataset Excel path or directory containing Excel files (default: {default_input})")
-    parser.add_argument("--output", default="search_results_ai.json", help="Path to save search results JSON")
+    parser.add_argument("--output", default="temp/search_results_ai.json", help="Path to save search results JSON")
     parser.add_argument("--top", type=int, default=500, help="Number of top visual matches to retrieve (default: 500)")
     parser.add_argument("--min-score", type=float, default=0.20, help="Minimum AI similarity score threshold (default: 0.20)")
     parser.add_argument("--min-text-sim", type=float, default=0.70, help="Minimum semantic text similarity score (default: 0.70, set to 0.0 to disable)")
@@ -443,6 +443,11 @@ def main():
     parser.add_argument("--min-price", type=float, default=None, help="Minimum product price threshold")
     parser.add_argument("--max-price", type=float, default=None, help="Maximum product price threshold")
     args = parser.parse_args()
+
+    # Ensure output parent directory exists if a path is specified
+    output_dir = os.path.dirname(args.output)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
 
     # Verify each query path exists individually
     query_paths = [q.strip() for q in args.query.split(";") if q.strip()]
