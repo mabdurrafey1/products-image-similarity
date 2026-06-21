@@ -45,7 +45,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           repository: mabdurrafey1/products-image-similarity-releases
-          token: ${{ secrets.GITHUB_RELEASES_PAT }}
+          token: ${{ secrets.RELEASES_PAT }}
           files: dist/*_dist.zip
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_RELEASES_PAT }}
+          GITHUB_TOKEN: ${{ secrets.RELEASES_PAT }}
