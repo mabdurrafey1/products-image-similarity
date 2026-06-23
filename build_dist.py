@@ -57,6 +57,15 @@ def build():
         else:
             print("Warning: input_data folder not found, skipping.")
 
+        # Copy runner scripts next to the binary/executable
+        for script in ["match_image_ai.py", "generate_report.py", "downloader.py"]:
+            if os.path.exists(script):
+                dest_script = os.path.join(dist_dir, script)
+                shutil.copy2(script, dest_script)
+                print(f"Copied script: {script} -> {dest_script}")
+            else:
+                print(f"Warning: Script {script} not found, skipping.")
+
     print("\n=== Step 3: Zipping the final distribution ===")
     for dist_dir in target_dirs:
         archive_base = dist_dir + "_dist"
