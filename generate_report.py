@@ -697,11 +697,20 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
             best_text = text_sim
 
         # Find local image path or fallback
+        # If output_html is placed inside a subfolder (like temp/search_results.html),
+        # local image path inside the HTML needs to reference the parent directory relative to it.
+        html_dir = os.path.dirname(output_html)
+        rel_images_dir = os.path.join("..", images_dir) if html_dir else images_dir
+        
         image_path = os.path.join(images_dir, f"{sku}.jpg")
+        html_image_path = os.path.join(rel_images_dir, f"{sku}.jpg")
+        
         if not os.path.exists(image_path):
             image_path = os.path.join(images_dir, f"{sku}.png")
+            html_image_path = os.path.join(rel_images_dir, f"{sku}.png")
+            
         if not os.path.exists(image_path):
-            image_path = "https://placehold.co/300x300/121829/ffffff?text=Image+Not+Found"
+            html_image_path = "https://placehold.co/300x300/121829/ffffff?text=Image+Not+Found"
 
         # Lookup extra attributes from the loaded Excel sheet
         sku_lookup = sku.upper()
@@ -742,7 +751,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                 thumbnails_html += f'<img class="thumb-img" src="{u}" alt="thumb" onclick="swapMainImage(this, \'{sku}\')">'
         else:
             # If no combined urls, just show the main image in thumbnail row
-            thumbnails_html += f'<img class="thumb-img active" src="{image_path}" alt="thumb">'
+            thumbnails_html += f'<img class="thumb-img active" src="{html_image_path}" alt="thumb">'
 
         price_str = f"AED {price:.0f}" if price else "N/A"
         match_badge_str = f"{match_count} SKU" if match_count else "1 SKU"
@@ -762,7 +771,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
 
                 <!-- Main Image -->
                 <div class="image-container">
-                    <img id="mainImg_{sku}" src="{image_path}" alt="{title}" onerror="this.src='https://placehold.co/300x300/121829/ffffff?text=Image+Not+Found'">
+                    <img id="mainImg_{sku}" src="{html_image_path}" alt="{title}" onerror="this.src='https://placehold.co/300x300/121829/ffffff?text=Image+Not+Found'">
                 </div>
 
                 <!-- Pills directly under image -->
@@ -809,7 +818,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
 
                 <!-- Action Buttons -->
                 <div class="actions-row">
-                    <button class="action-btn btn-view" onclick="viewImage('{image_path}')">View</button>
+                    <button class="action-btn btn-view" onclick="viewImage('{html_image_path}')">View</button>
                     <a class="action-btn btn-open" href="{product_url}" target="_blank">Open</a>
                     <button class="action-btn btn-copy" onclick="copyTextDirect('{sku}')">Copy</button>
                 </div>
