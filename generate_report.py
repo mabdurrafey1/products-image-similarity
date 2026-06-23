@@ -721,12 +721,18 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
         zsku = attrs.get('Best_ZSKU', sku)
         if pd.isna(zsku):
             zsku = sku
-        brand = attrs.get('Best_Brand', 'Generic')
+            
+        brand = attrs.get('Best_Brand', attrs.get('Brand', 'Generic'))
         if pd.isna(brand):
             brand = 'Generic'
+            
         color = attrs.get('Best_Color', '')
         stock = attrs.get('Best_Stock', '')
-        product_url = attrs.get('Best_Product_URL', '')
+        
+        product_url = attrs.get('Best_Product_URL', attrs.get('Product Link', ''))
+        if pd.isna(product_url):
+            product_url = ''
+            
         match_count = str(attrs.get('Match_Count', '1')).split('.')[0]  # Format float to int string
 
         # Build category/brand/stock pills
