@@ -3,36 +3,18 @@ import os
 import pandas as pd
 
 def normalize_dataframe(df):
-    """Normalize column names from different Excel formats (old scrape format vs new report format)."""
+    """Normalize column names from the final Excel layout format."""
     mapping = {
-        'Input_SKU': 'SKU',
-        'Best_ZSKU': 'SKU',
-        'Standard_ZSKU': 'SKU',
         'sku': 'SKU',
-        
-        'Best_Title': 'Title',
-        'Standard_Title': 'Title',
+        'Sku': 'SKU',
         'Product Title': 'Title',
-        
-        'Best_Price': 'Price',
-        'Standard_Price': 'Price',
-        'Price': 'Price',
-        
-        'Best_Main_Image_URL': 'Image URL',
-        'Standard_Main_Image_URL': 'Image URL',
         'Main Image URL': 'Image URL'
     }
     
     rename_dict = {}
     assigned_targets = set(df.columns)
     
-    # Process column mappings in order of preference to avoid duplicates
-    preferred_order = [
-        'Input_SKU', 'Best_ZSKU', 'Standard_ZSKU', 'sku',
-        'Best_Title', 'Standard_Title', 'Product Title',
-        'Best_Price', 'Standard_Price', 'Price',
-        'Best_Main_Image_URL', 'Standard_Main_Image_URL', 'Main Image URL'
-    ]
+    preferred_order = ['sku', 'Sku', 'Product Title', 'Main Image URL']
     
     for col in preferred_order:
         if col in df.columns and col in mapping:
@@ -718,22 +700,19 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
         attrs = extra_attrs.get(matched_sku_key, {}) if matched_sku_key else {}
 
         # Fetch extra fields
-        zsku = attrs.get('Best_ZSKU', sku)
-        if pd.isna(zsku):
-            zsku = sku
-            
-        brand = attrs.get('Best_Brand', attrs.get('Brand', 'Generic'))
+        zsku = sku
+        brand = attrs.get('Brand', 'Generic')
         if pd.isna(brand):
             brand = 'Generic'
             
-        color = attrs.get('Best_Color', '')
-        stock = attrs.get('Best_Stock', '')
+        color = ''
+        stock = ''
         
-        product_url = attrs.get('Best_Product_URL', attrs.get('Product Link', ''))
+        product_url = attrs.get('Product Link', '')
         if pd.isna(product_url):
             product_url = ''
             
-        match_count = str(attrs.get('Match_Count', '1')).split('.')[0]  # Format float to int string
+        match_count = '1'
 
         # Build category/brand/stock pills
         tags_html = ""

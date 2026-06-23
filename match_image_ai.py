@@ -117,37 +117,18 @@ def clean_image_cache(image_dir):
         print(f"Removed {corrupted_count} corrupted or empty images from cache.\n")
 
 def normalize_dataframe(df):
-    """Normalize column names from different Excel formats (old scrape format vs new report format)."""
+    """Normalize column names from the final Excel layout format."""
     mapping = {
-        'Input_SKU': 'SKU',
-        'Best_ZSKU': 'SKU',
-        'Standard_ZSKU': 'SKU',
         'sku': 'SKU',
         'Sku': 'SKU',
-        
-        'Best_Title': 'Title',
-        'Standard_Title': 'Title',
         'Product Title': 'Title',
-        
-        'Best_Price': 'Price',
-        'Standard_Price': 'Price',
-        'Price': 'Price',
-        
-        'Best_Main_Image_URL': 'Image URL',
-        'Standard_Main_Image_URL': 'Image URL',
         'Main Image URL': 'Image URL'
     }
     
     rename_dict = {}
     assigned_targets = set(df.columns)
     
-    # Process column mappings in order of preference to avoid duplicates
-    preferred_order = [
-        'Input_SKU', 'Best_ZSKU', 'Standard_ZSKU', 'sku',
-        'Best_Title', 'Standard_Title', 'Product Title',
-        'Best_Price', 'Standard_Price', 'Price',
-        'Best_Main_Image_URL', 'Standard_Main_Image_URL', 'Main Image URL'
-    ]
+    preferred_order = ['sku', 'Sku', 'Product Title', 'Main Image URL']
     
     for col in preferred_order:
         if col in df.columns and col in mapping:
