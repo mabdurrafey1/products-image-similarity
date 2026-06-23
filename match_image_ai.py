@@ -123,6 +123,7 @@ def normalize_dataframe(df):
         'Best_ZSKU': 'SKU',
         'Standard_ZSKU': 'SKU',
         'sku': 'SKU',
+        'Sku': 'SKU',
         
         'Best_Title': 'Title',
         'Standard_Title': 'Title',
