@@ -56,16 +56,6 @@ def build():
             print(f"Copied folder: input_data -> {dest_input}")
         else:
             print("Warning: input_data folder not found, skipping.")
-        
-        # Copy runner scripts next to the binary/executable
-        for script in ["match_image_ai.py", "generate_report.py", "downloader.py"]:
-            if os.path.exists(script):
-                dest_script = os.path.join(dist_dir, script)
-                shutil.copy2(script, dest_script)
-                print(f"Copied script: {script} -> {dest_script}")
-            else:
-                print(f"Warning: Script {script} not found, skipping.")
-
         # Create output temp directory next to the binary
         dest_temp = os.path.join(dist_dir, "temp")
         os.makedirs(dest_temp, exist_ok=True)
