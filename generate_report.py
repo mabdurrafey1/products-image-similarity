@@ -673,7 +673,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
             <div class="container">
                 <header>
                     <h1>AI Listing Matching Results</h1>
-                    <p>Database Sheet: Best_One_Row_Per_SKU | Matches Found: {total_matches}</p>
+                    <p>Database: {os.path.basename(excel_path)} | Matches Found: {total_matches}</p>
                 </header>
 
                 <div class="results-grid">
