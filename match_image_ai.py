@@ -122,15 +122,19 @@ def normalize_dataframe(df):
         'Input_SKU': 'SKU',
         'Best_ZSKU': 'SKU',
         'Standard_ZSKU': 'SKU',
+        'sku': 'SKU',
         
         'Best_Title': 'Title',
         'Standard_Title': 'Title',
+        'Product Title': 'Title',
         
         'Best_Price': 'Price',
         'Standard_Price': 'Price',
+        'Price': 'Price',
         
         'Best_Main_Image_URL': 'Image URL',
-        'Standard_Main_Image_URL': 'Image URL'
+        'Standard_Main_Image_URL': 'Image URL',
+        'Main Image URL': 'Image URL'
     }
     
     rename_dict = {}
@@ -138,10 +142,10 @@ def normalize_dataframe(df):
     
     # Process column mappings in order of preference to avoid duplicates
     preferred_order = [
-        'Input_SKU', 'Best_ZSKU', 'Standard_ZSKU',
-        'Best_Title', 'Standard_Title',
-        'Best_Price', 'Standard_Price',
-        'Best_Main_Image_URL', 'Standard_Main_Image_URL'
+        'Input_SKU', 'Best_ZSKU', 'Standard_ZSKU', 'sku',
+        'Best_Title', 'Standard_Title', 'Product Title',
+        'Best_Price', 'Standard_Price', 'Price',
+        'Best_Main_Image_URL', 'Standard_Main_Image_URL', 'Main Image URL'
     ]
     
     for col in preferred_order:
