@@ -56,10 +56,6 @@ def build():
             print(f"Copied folder: input_data -> {dest_input}")
         else:
             print("Warning: input_data folder not found, skipping.")
-        # Create output temp directory next to the binary
-        dest_temp = os.path.join(dist_dir, "temp")
-        os.makedirs(dest_temp, exist_ok=True)
-        print(f"Created temp directory inside build folder: {dest_temp}")
 
     print("\n=== Step 3: Zipping the final distribution ===")
     for dist_dir in target_dirs:
