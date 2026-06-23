@@ -18,6 +18,8 @@ def build():
         "--clean",
         "-y",
         "--noconsole",
+        "--hidden-import=onnxruntime",
+        "--hidden-import=huggingface_hub",
         "--name=AI_Product_Duplicate_Finder",
         "gui.py"
     ]
