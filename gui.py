@@ -260,13 +260,13 @@ class SearchTab(tk.Frame):
         btn_frame = tk.Frame(main_frame)
         btn_frame.pack(fill="x", pady=5)
         
-        self.run_btn = tk.Button(btn_frame, text="Find Duplicate Listings", command=self.start_matching_thread, font=("Segoe UI", 11, "bold"), height=2, bg="#3b82f6", fg="white", activebackground="#2563eb")
+        self.run_btn = tk.Button(btn_frame, text="Find Duplicate Listings", command=self.start_matching_thread, font=("Segoe UI", 11, "bold"), height=2)
         self.run_btn.pack(fill="x", side="left", expand=True, padx=5)
         
         self.view_btn = tk.Button(btn_frame, text="View Results (HTML)", command=self.open_last_results, font=("Segoe UI", 11, "bold"), height=2)
         self.view_btn.pack(fill="x", side="left", expand=True, padx=5)
         
-        self.close_btn = tk.Button(btn_frame, text="Close Tab", command=self.close_tab, font=("Segoe UI", 11, "bold"), height=2, bg="#ef4444", fg="white", activebackground="#dc2626")
+        self.close_btn = tk.Button(btn_frame, text="Close Tab", command=self.close_tab, font=("Segoe UI", 11, "bold"), height=2)
         self.close_btn.pack(fill="x", side="left", expand=True, padx=5)
         
         # Log Panel
@@ -484,7 +484,7 @@ class DuplicateFinderGUI:
         top_bar = tk.Frame(root)
         top_bar.pack(fill="x", padx=15, pady=5)
         
-        add_tab_btn = tk.Button(top_bar, text="+ Add New Search Tab", command=self.add_search_tab, font=("Segoe UI", 10, "bold"), bg="#10b981", fg="white", activebackground="#059669")
+        add_tab_btn = tk.Button(top_bar, text="+ Add New Search Tab", command=self.add_search_tab, font=("Segoe UI", 10, "bold"))
         add_tab_btn.pack(side="left", padx=5, pady=5)
         
         # Notebook Layout
