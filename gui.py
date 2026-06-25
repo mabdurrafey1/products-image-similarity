@@ -345,11 +345,10 @@ class SearchTab(tk.Frame):
             self.image_path_var.set(";".join(self.selected_images))
 
     def open_last_results(self):
-        html_path = os.path.abspath(f"temp/search_results_{self.tab_id}.html")
-        if os.path.exists(html_path):
-            webbrowser.open(f"file:///{html_path}")
+        if hasattr(self, 'last_report_path') and os.path.exists(self.last_report_path):
+            webbrowser.open(f"file:///{os.path.abspath(self.last_report_path)}")
         else:
-            messagebox.showwarning("No Results", f"No generated temp/search_results_{self.tab_id}.html file was found. Run a search first.")
+            messagebox.showwarning("No Results", "No generated reports HTML file was found. Run a search first.")
 
     def start_matching_thread(self):
         if self.is_running:
@@ -426,14 +425,29 @@ class SearchTab(tk.Frame):
                 # Execute match_image_ai main method
                 match_image_ai.main()
                 
+                import datetime
+                # Slugify query_title for report filename
+                slug = re.sub(r'[^a-zA-Z0-9_-]', '_', query_title).strip('_')
+                if not slug:
+                    slug = "search_results"
+                slug = slug[:50]
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                report_filename = f"{slug}_{timestamp}.html"
+                report_path = os.path.join("reports", report_filename)
+                os.makedirs("reports", exist_ok=True)
+                self.last_report_path = report_path
+
                 # Execute generate_report html generator
                 self.main_app.root.after(0, self.status_var.set, "Compiling search matches into HTML dashboard...")
-                self.main_app.root.after(0, self.append_log, f"Generating temp/search_results_{self.tab_id}.html report...\n")
+                self.main_app.root.after(0, self.append_log, f"Generating {report_path} report...\n")
                 
+                query_images_list = [p.strip() for p in image_path.split(";") if p.strip()]
                 generate_report.generate_html_report(
                     json_path=f"temp/search_results_ai_{self.tab_id}.json",
-                    output_html=f"temp/search_results_{self.tab_id}.html",
-                    excel_path=excel_path
+                    output_html=report_path,
+                    excel_path=excel_path,
+                    query_title=query_title,
+                    query_images=query_images_list
                 )
             finally:
                 sys.argv = old_argv
@@ -450,7 +464,7 @@ class SearchTab(tk.Frame):
     def on_search_success(self):
         self.progress.stop()
         self.run_btn.config(state="normal")
-        self.status_var.set(f"Search complete! Matches saved to temp/search_results_{self.tab_id}.html")
+        self.status_var.set(f"Search complete! Matches saved to {self.last_report_path}")
         self.append_log("\n[SUCCESS] AI Duplicate Finder completed successfully.\n")
         
         if messagebox.askyesno("Search Complete", f"AI search matching finished successfully for Tab #{self.tab_id}!\n\nWould you like to open the HTML results dashboard in your browser?"):

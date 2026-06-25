@@ -46,7 +46,7 @@ def load_excel_with_sheets(file_path):
         df = pd.read_excel(file_path)
         return normalize_dataframe(df)
 
-def generate_html_report(json_path="temp/search_results_ai.json", output_html="temp/search_results.html", images_dir="downloaded_images", excel_path=None):
+def generate_html_report(json_path="temp/search_results_ai.json", output_html="temp/search_results.html", images_dir="downloaded_images", excel_path=None, query_title="", query_images=None):
     if excel_path is None:
         import glob
         excel_files = sorted(glob.glob("input_data/*.xlsx"))
@@ -58,6 +58,33 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
 
     with open(json_path, 'r', encoding='utf-8') as f:
         results = json.load(f)
+
+    # Base64 encode query images for sidebar self-containment
+    import base64
+    query_images_html = ""
+    if query_images:
+        for img_path in query_images:
+            if os.path.exists(img_path):
+                try:
+                    with open(img_path, "rb") as img_file:
+                        encoded_string = base64.b64encode(img_file.read()).decode('utf-8')
+                    ext = os.path.splitext(img_path)[1].lower().replace('.', '')
+                    if ext in ['jpg', 'jpeg']:
+                        mime = 'image/jpeg'
+                    elif ext == 'png':
+                        mime = 'image/png'
+                    elif ext == 'webp':
+                        mime = 'image/webp'
+                    else:
+                        mime = f'image/{ext}'
+                    base64_data = f"data:{mime};base64,{encoded_string}"
+                    query_images_html += f'<img class="query-thumb" src="{base64_data}" alt="query img" onclick="viewImage(\'{base64_data}\')" style="width: 70px; height: 70px; object-fit: cover; border-radius: 6px; border: 1px solid #cbd5e1; cursor: pointer;">'
+                except Exception as e:
+                    print(f"Error base64 encoding query image {img_path}: {e}")
+    if not query_images_html:
+        query_images_html = '<span style="color: #64748b; font-size: 0.85rem; font-style: italic;">No query images</span>'
+
+    query_title_html = f'<div style="font-weight: 500; font-size: 0.9rem; color: #1e293b; word-break: break-word;">{query_title}</div>' if query_title else '<span style="color: #64748b; font-size: 0.85rem; font-style: italic;">No query title</span>'
 
 
     prices = []
@@ -626,6 +653,13 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
     <div class="app-layout">
         <aside class="sidebar">
 
+            <!-- SEARCH QUERY (Original inputs) -->
+            <div class="sidebar-section" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin-bottom: 15px;">
+                <label class="sidebar-label" style="display: block; font-size: 0.75rem; font-weight: 700; color: #64748b; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em;">Search Query</label>
+                <div style="margin-bottom: 8px;">{query_title_placeholder}</div>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap;">{query_images_placeholder}</div>
+            </div>
+
             <!-- START / END PRICE -->
             <div class="sidebar-section">
                 <label class="sidebar-label">START / END PRICE</label>
@@ -1012,6 +1046,8 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
     html_content = html_content.replace("{best_text}", f"{best_text:.3f}" if best_text else "N/A")
     html_content = html_content.replace("{min_db_price}", str(min_db_price))
     html_content = html_content.replace("{max_db_price}", str(max_db_price))
+    html_content = html_content.replace("{query_title_placeholder}", query_title_html)
+    html_content = html_content.replace("{query_images_placeholder}", query_images_html)
 
     with open(output_html, 'w', encoding='utf-8') as f:
         f.write(html_content)
