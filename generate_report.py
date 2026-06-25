@@ -744,6 +744,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
         match_badge_str = f"{match_count} SKU" if match_count else "1 SKU"
         ai_score_str = f"VS: {ai_score:.2f}" if ai_score is not None else "VS: N/A"
         text_sim_str = f"TX: {text_sim*100:.0f}%" if text_sim is not None else "TX: N/A"
+        img_count = len(img_urls_list) if img_urls_list else 1
 
         # Build card template
         html_content += f"""
@@ -753,7 +754,10 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                     <label>
                         <input type="checkbox" class="select-checkbox" data-sku="{sku}" data-zsku="{zsku}" onchange="updateSelection()"> Select
                     </label>
-                    <span style="font-size: 0.75rem; font-weight: 800; color: var(--color-blue); background: #eff6ff; padding: 2px 6px; border-radius: 4px;">#{rank}</span>
+                    <span class="rank-badge-container" style="font-size: 0.75rem; font-weight: 800; color: var(--color-blue); background: #eff6ff; padding: 2px 6px; border-radius: 4px; display: flex; gap: 6px; align-items: center;">
+                        <span>Orig: #{rank}</span>
+                        <span class="new-rank-badge" style="color: #16a34a; background: #f0fdf4; padding: 1px 4px; border-radius: 2px;">New: #{rank}</span>
+                    </span>
                 </div>
 
                 <!-- Main Image -->
@@ -775,7 +779,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                 <!-- Tags / Custom attributes -->
                 <div class="tags-row">
                     {tags_html}
-                    <span class="tag-pill">{len(img_urls_list)} imgs</span>
+                    <span class="tag-pill">{img_count} imgs</span>
                 </div>
 
                 <!-- SKU Table Box -->
@@ -975,8 +979,18 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                 return 0;
             });
 
-            // 3. Re-append in sorted order
-            cards.forEach(card => grid.appendChild(card));
+            // 3. Re-append in sorted order and update new rank badges
+            let visibleIndex = 1;
+            cards.forEach(card => {
+                grid.appendChild(card);
+                if (card.style.display !== 'none') {
+                    const newRankSpan = card.querySelector('.new-rank-badge');
+                    if (newRankSpan) {
+                        newRankSpan.innerText = 'New: #' + visibleIndex;
+                    }
+                    visibleIndex++;
+                }
+            });
             
             // Clear selections that are now hidden
             updateSelection();
