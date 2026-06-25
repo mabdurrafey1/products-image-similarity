@@ -408,44 +408,73 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
             object-fit: contain;
         }
 
-        /* Badges Directly Under Image */
-        .pills-row {
+        /* Overlays on Image Container */
+        .image-bottom-overlay {
+            position: absolute;
+            bottom: 6px;
+            left: 6px;
+            right: 6px;
             display: flex;
-            gap: 6px;
-            margin-bottom: 10px;
-            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 10;
+            pointer-events: none;
         }
 
-        .pill-badge {
-            font-size: 0.75rem;
+        .overlay-badge {
+            font-size: 0.68rem;
             font-weight: 700;
-            padding: 0.25rem 0.6rem;
+            padding: 2px 5px;
             border-radius: 4px;
-            text-transform: uppercase;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+            pointer-events: auto;
+            display: inline-block;
         }
 
-        .pill-price {
-            background: #dcfce7;
-            color: #15803d;
-            border: 1px solid #bbf7d0;
+        .badge-price {
+            background: var(--color-green);
+            color: white;
         }
 
-        .pill-dark {
-            background: #f1f5f9;
-            color: #475569;
-            border: 1px solid #e2e8f0;
+        .badge-vs {
+            background: #6366f1;
+            color: white;
         }
 
-        .pill-visual {
-            background: #e0e7ff;
-            color: #4338ca;
-            border: 1px solid #c7d2fe;
+        .badge-tx {
+            background: #db2777;
+            color: white;
         }
 
-        .pill-text {
-            background: #fce7f3;
-            color: #be185d;
-            border: 1px solid #fbcfe8;
+        .verify-badge-overlay {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            display: flex;
+            gap: 4px;
+            z-index: 10;
+        }
+
+        .verify-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            box-shadow: 0 0 0 2px #ffffff;
+        }
+
+        .verify-dot.ready {
+            background: #22c55e;
+        }
+
+        .verify-dot.missing {
+            background: #ef4444;
+        }
+
+        .tag-match {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            color: #1e40af;
         }
 
         /* Product Title */
@@ -453,11 +482,11 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
             font-size: 0.8rem;
             font-weight: 700;
             color: var(--text-primary);
-            line-height: 1.4;
+            line-height: 1.35;
             margin-bottom: 8px;
-            height: 3.4rem;
+            height: 2.2rem;
             display: -webkit-box;
-            -webkit-line-clamp: 3;
+            -webkit-line-clamp: 2;
             -webkit-box-orient: vertical;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -598,30 +627,28 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
         }
 
         .btn-view {
-            background: #eff6ff;
-            color: #2563eb;
-            border: 1px solid #bfdbfe;
+            background: var(--color-blue);
+            color: white;
         }
         .btn-view:hover {
-            background: #dbeafe;
+            background: #1d4ed8;
         }
 
         .btn-open {
-            background: #f0fdf4;
-            color: #16a34a;
-            border: 1px solid #bbf7d0;
+            background: var(--color-green);
+            color: white;
         }
         .btn-open:hover {
-            background: #dcfce7;
+            background: #059669;
         }
 
         .btn-copy {
-            background: #f8fafc;
-            color: #475569;
-            border: 1px solid #e2e8f0;
+            background: var(--color-grey-light);
+            color: var(--color-grey-dark);
+            border: 1px solid var(--border-color);
         }
         .btn-copy:hover {
-            background: #f1f5f9;
+            background: #e5e7eb;
         }
 
         /* Alert/Notification Box */
@@ -786,6 +813,11 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
         text_sim_str = f"TX: {text_sim*100:.0f}%" if text_sim is not None else "TX: N/A"
         img_count = len(img_urls_list) if img_urls_list else 1
 
+        url_ready_class = "ready" if (product_url and str(product_url).strip()) else "missing"
+        url_status = "Available" if url_ready_class == "ready" else "Not Available"
+        image_ready_class = "ready" if (html_image_path and "Image+Not+Found" not in html_image_path) else "missing"
+        image_status = "Available" if image_ready_class == "ready" else "Not Available"
+
         # Build card template
         html_content += f"""
             <div class="match-card" data-sku="{sku}" data-zsku="{zsku}" data-rank="{rank}" data-vs="{ai_score if ai_score is not None else 0}" data-tx="{text_sim if text_sim is not None else 0}">
@@ -800,43 +832,42 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                     </span>
                 </div>
 
-                <!-- Main Image -->
+                <!-- Main Image Container with overlays -->
                 <div class="image-container" style="position: relative;">
-                    <div class="verify-badge-overlay" style="position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; pointer-events: none; z-index: 10;">
-                        <span class="verify-dot" title="URL Ready" style="background: #22c55e; width: 8px; height: 8px; border-radius: 50%; display: inline-block; box-shadow: 0 0 0 2px #fff;"></span>
-                        <span class="verify-dot" title="Image Ready" style="background: #22c55e; width: 8px; height: 8px; border-radius: 50%; display: inline-block; box-shadow: 0 0 0 2px #fff;"></span>
+                    <div class="verify-badge-overlay">
+                        <span class="verify-dot {url_ready_class}" title="URL Ready: {url_status}"></span>
+                        <span class="verify-dot {image_ready_class}" title="Image Ready: {image_status}"></span>
                     </div>
                     <img id="mainImg_{sku}" src="{html_image_path}" alt="{title}" onerror="this.src='https://placehold.co/300x300/121829/ffffff?text=Image+Not+Found'">
-                </div>
-
-                <!-- Pills directly under image -->
-                <div class="pills-row">
-                    <span class="pill-badge pill-price">{price_str}</span>
-                    <span class="pill-badge pill-visual">{ai_score_str}</span>
-                    <span class="pill-badge pill-text">{text_sim_str}</span>
-                    <span class="pill-badge pill-dark">{match_badge_str}</span>
+                    
+                    <div class="image-bottom-overlay">
+                        <span class="overlay-badge badge-price">{price_str}</span>
+                        <div style="display: flex; gap: 4px;">
+                            <span class="overlay-badge badge-vs" title="Visual Similarity Score">{ai_score_str}</span>
+                            <span class="overlay-badge badge-tx" title="Text Similarity Score">{text_sim_str}</span>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Product Title -->
                 <div class="product-title" title="{title}">{title}</div>
 
-                <!-- Tags / Custom attributes -->
+                <!-- Tags / Custom attributes + Match Badge -->
                 <div class="tags-row">
                     {tags_html}
                     <span class="tag-pill">{img_count} imgs</span>
+                    <span class="tag-pill tag-match">{match_badge_str}</span>
                 </div>
 
-                <!-- SKU Container -->
-                <div class="sku-container" style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px;">
-                    <div class="sku-pill" onclick="copyTextDirect('{sku}')" title="Click to copy SKU" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 5px 8px; display: flex; align-items: center; justify-content: space-between; font-size: 0.72rem; cursor: pointer; transition: all 0.15s ease;">
-                        <span class="sku-pill-label" style="font-weight: 700; color: #64748b;">SKU:</span>
-                        <span class="sku-pill-val" style="font-family: monospace; color: #334155; font-weight: 500; margin-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px;">{sku}</span>
-                        <span class="sku-copy-icon" style="font-size: 0.65rem; color: #94a3b8; margin-left: auto;">📋</span>
+                <!-- SKU & ZSKU Side-by-Side Copy Container -->
+                <div class="sku-container-row" style="display: flex; gap: 6px; margin-bottom: 8px; width: 100%;">
+                    <div class="sku-pill-half" onclick="copyTextDirect('{sku}')" title="Click to copy SKU" style="flex: 1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 5px 6px; display: flex; align-items: center; justify-content: space-between; font-size: 0.7rem; cursor: pointer; transition: all 0.15s ease; min-width: 0;">
+                        <span style="font-weight: 700; color: #64748b; margin-right: 4px;">SKU:</span>
+                        <span style="font-family: monospace; color: #334155; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-grow: 1; text-align: right;">{sku}</span>
                     </div>
-                    <div class="sku-pill" onclick="copyTextDirect('{zsku}')" title="Click to copy ZSKU" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 5px 8px; display: flex; align-items: center; justify-content: space-between; font-size: 0.72rem; cursor: pointer; transition: all 0.15s ease;">
-                        <span class="sku-pill-label" style="font-weight: 700; color: #64748b;">ZSKU:</span>
-                        <span class="sku-pill-val" style="font-family: monospace; color: #334155; font-weight: 500; margin-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px;">{zsku}</span>
-                        <span class="sku-copy-icon" style="font-size: 0.65rem; color: #94a3b8; margin-left: auto;">📋</span>
+                    <div class="sku-pill-half" onclick="copyTextDirect('{zsku}')" title="Click to copy ZSKU" style="flex: 1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 5px 6px; display: flex; align-items: center; justify-content: space-between; font-size: 0.7rem; cursor: pointer; transition: all 0.15s ease; min-width: 0;">
+                        <span style="font-weight: 700; color: #64748b; margin-right: 4px;">ZSKU:</span>
+                        <span style="font-family: monospace; color: #334155; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-grow: 1; text-align: right;">{zsku}</span>
                     </div>
                 </div>
 
@@ -902,7 +933,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
 
         function copyTextDirect(text) {
             navigator.clipboard.writeText(text).then(() => {
-                showToast("Copied SKU: " + text);
+                showToast("Copied: " + text);
             });
         }
 
