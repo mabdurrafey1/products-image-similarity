@@ -96,7 +96,7 @@ thread_safe_stderr = ThreadSafeStdoutRedirector(sys.stderr)
 sys.stdout = thread_safe_stdout
 sys.stderr = thread_safe_stderr
 
-class SearchTab(tk.Frame):
+class SearchTab(ttk.Frame):
     def __init__(self, parent, tab_id, main_app):
         super().__init__(parent)
         self.tab_id = tab_id
@@ -104,45 +104,46 @@ class SearchTab(tk.Frame):
         self.is_running = False
         
         # Container frame inside tab
-        main_frame = tk.Frame(self)
+        main_frame = ttk.Frame(self)
         main_frame.pack(fill="both", expand=True, padx=15, pady=10)
         
         # Form Card Frame
-        form_card = tk.LabelFrame(main_frame, text=f" Search Parameters (Tab #{self.tab_id}) ", font=("Segoe UI", 10, "bold"), padx=15, pady=15)
-        form_card.pack(fill="x", pady=5)
+        form_card = ttk.LabelFrame(main_frame, text=f" Search Parameters (Tab #{self.tab_id}) ")
+        form_card.pack(fill="x", pady=5, ipadx=10, ipady=10)
         
         # 1. Query Image Selection Row
-        image_label = tk.Label(form_card, text="Query Image:")
-        image_label.grid(row=0, column=0, sticky="w", padx=5, pady=10)
+        image_label = ttk.Label(form_card, text="Query Image:")
+        image_label.grid(row=0, column=0, sticky="w", padx=10, pady=10)
         
         self.image_path_var = tk.StringVar()
         self.selected_images = []
         self.preview_photos = []
         
         # Frame to hold the horizontal list of thumbnails
-        self.thumbnail_container = tk.Frame(form_card)
+        self.thumbnail_container = ttk.Frame(form_card)
         self.thumbnail_container.grid(row=0, column=1, padx=5, pady=10, sticky="w")
         
         # Placeholder label
-        self.placeholder_label = tk.Label(self.thumbnail_container, text="No images selected. Click Browse...", font=("Segoe UI", 9, "italic"), fg="gray")
+        self.placeholder_label = ttk.Label(self.thumbnail_container, text="No images selected. Click Browse...", font=("Segoe UI", 9, "italic"))
         self.placeholder_label.pack(side="left", padx=5)
         
-        browse_btn = tk.Button(form_card, text="Browse...", command=self.browse_image)
-        browse_btn.grid(row=0, column=2, padx=5, pady=10)
+        browse_btn = ttk.Button(form_card, text="Browse...", command=self.browse_image)
+        browse_btn.grid(row=0, column=2, padx=10, pady=10)
         
         # Trace variable changes to automatically update preview
         self.image_path_var.trace_add("write", lambda *args: self.update_preview())
         
         # 2. Query Title Row
-        title_label = tk.Label(form_card, text="Query Title:")
-        title_label.grid(row=1, column=0, sticky="nw", padx=5, pady=10)
+        title_label = ttk.Label(form_card, text="Query Title:")
+        title_label.grid(row=1, column=0, sticky="nw", padx=10, pady=10)
         
+        # Standard tk.Text is kept because ttk doesn't have a Text widget
         self.title_text = tk.Text(form_card, height=3, width=40, font=("Segoe UI", 10))
-        self.title_text.grid(row=1, column=1, columnspan=2, padx=5, pady=10, sticky="we")
+        self.title_text.grid(row=1, column=1, columnspan=2, padx=10, pady=10, sticky="we")
         
         # 3. Input Source Row
-        source_label = tk.Label(form_card, text="Input Source:")
-        source_label.grid(row=2, column=0, sticky="w", padx=5, pady=10)
+        source_label = ttk.Label(form_card, text="Input Source:")
+        source_label.grid(row=2, column=0, sticky="w", padx=10, pady=10)
         
         import glob
         excel_files = sorted(glob.glob("input_data/*.xlsx"))
@@ -152,74 +153,74 @@ class SearchTab(tk.Frame):
             
         self.selected_excel_var = tk.StringVar(value=self.excel_options[0])
         self.source_dropdown = ttk.Combobox(form_card, textvariable=self.selected_excel_var, values=self.excel_options, state="readonly", width=40)
-        self.source_dropdown.grid(row=2, column=1, columnspan=2, padx=5, pady=10, sticky="w")
+        self.source_dropdown.grid(row=2, column=1, columnspan=2, padx=10, pady=10, sticky="w")
         
         # 4. Price Range Row
-        price_label = tk.Label(form_card, text="Price Range:")
-        price_label.grid(row=3, column=0, sticky="w", padx=5, pady=10)
+        price_label = ttk.Label(form_card, text="Price Range:")
+        price_label.grid(row=3, column=0, sticky="w", padx=10, pady=10)
         
-        price_frame = tk.Frame(form_card)
-        price_frame.grid(row=3, column=1, columnspan=2, sticky="w", padx=5, pady=10)
+        price_frame = ttk.Frame(form_card)
+        price_frame.grid(row=3, column=1, columnspan=2, sticky="w", padx=10, pady=10)
         
-        min_lbl = tk.Label(price_frame, text="Min:")
+        min_lbl = ttk.Label(price_frame, text="Min:")
         min_lbl.pack(side="left", padx=2)
         
         self.min_price_var = tk.StringVar(value="")
-        min_entry = tk.Entry(price_frame, textvariable=self.min_price_var, width=10, font=("Segoe UI", 10))
+        min_entry = ttk.Entry(price_frame, textvariable=self.min_price_var, width=10)
         min_entry.pack(side="left", padx=5)
         
-        max_lbl = tk.Label(price_frame, text="Max:")
+        max_lbl = ttk.Label(price_frame, text="Max:")
         max_lbl.pack(side="left", padx=2)
         
         self.max_price_var = tk.StringVar(value="")
-        max_entry = tk.Entry(price_frame, textvariable=self.max_price_var, width=10, font=("Segoe UI", 10))
+        max_entry = ttk.Entry(price_frame, textvariable=self.max_price_var, width=10)
         max_entry.pack(side="left", padx=5)
         
-        aed_lbl = tk.Label(price_frame, text="AED", font=("Segoe UI", 9, "bold"))
+        aed_lbl = ttk.Label(price_frame, text="AED", font=("Segoe UI", 9, "bold"))
         aed_lbl.pack(side="left", padx=5)
         
         # 5. Settings Row
-        settings_frame = tk.Frame(form_card)
-        settings_frame.grid(row=4, column=0, columnspan=3, pady=10, sticky="w", padx=5)
+        settings_frame = ttk.Frame(form_card)
+        settings_frame.grid(row=4, column=0, columnspan=3, pady=10, sticky="w", padx=10)
         
         self.strict_var = tk.BooleanVar(value=False)
-        strict_cb = tk.Checkbutton(settings_frame, text="Strict Model Matching", variable=self.strict_var)
+        strict_cb = ttk.Checkbutton(settings_frame, text="Strict Model Matching", variable=self.strict_var)
         strict_cb.pack(side="left", padx=5)
         
         self.no_indexing_var = tk.BooleanVar(value=False)
-        no_indexing_cb = tk.Checkbutton(settings_frame, text="Skip Image Index Check", variable=self.no_indexing_var)
+        no_indexing_cb = ttk.Checkbutton(settings_frame, text="Skip Image Index Check", variable=self.no_indexing_var)
         no_indexing_cb.pack(side="left", padx=5)
         
-        top_lbl = tk.Label(settings_frame, text="Limit Matches:")
+        top_lbl = ttk.Label(settings_frame, text="Limit Matches:")
         top_lbl.pack(side="left", padx=(10, 5))
         
         self.top_var = tk.StringVar(value="500")
-        top_spinner = tk.Spinbox(settings_frame, from_=5, to=2000, width=5, textvariable=self.top_var)
+        top_spinner = ttk.Spinbox(settings_frame, from_=5, to=2000, width=5, textvariable=self.top_var)
         top_spinner.pack(side="left", padx=5)
 
-        workers_lbl = tk.Label(settings_frame, text="Workers:")
+        workers_lbl = ttk.Label(settings_frame, text="Workers:")
         workers_lbl.pack(side="left", padx=(10, 5))
 
         self.workers_var = tk.StringVar(value="10")
-        workers_spinner = tk.Spinbox(settings_frame, from_=1, to=100, width=5, textvariable=self.workers_var)
+        workers_spinner = ttk.Spinbox(settings_frame, from_=1, to=100, width=5, textvariable=self.workers_var)
         workers_spinner.pack(side="left", padx=5)
 
         # 6. Thresholds Row
-        sim_label = tk.Label(form_card, text="Match Thresholds:")
-        sim_label.grid(row=5, column=0, sticky="w", padx=5, pady=10)
+        sim_label = ttk.Label(form_card, text="Match Thresholds:")
+        sim_label.grid(row=5, column=0, sticky="w", padx=10, pady=10)
 
-        sim_frame = tk.Frame(form_card)
-        sim_frame.grid(row=5, column=1, columnspan=2, sticky="we", padx=5, pady=10)
+        sim_frame = ttk.Frame(form_card)
+        sim_frame.grid(row=5, column=1, columnspan=2, sticky="we", padx=10, pady=10)
 
         # Text Match Threshold
-        text_frame = tk.Frame(sim_frame)
+        text_frame = ttk.Frame(sim_frame)
         text_frame.pack(side="left", fill="x", expand=True, padx=(0, 15))
 
-        text_lbl = tk.Label(text_frame, text="Text:")
+        text_lbl = ttk.Label(text_frame, text="Text:")
         text_lbl.pack(side="left", padx=(0, 5))
 
         self.text_sim_var = tk.DoubleVar(value=70.0)
-        self.sim_value_lbl = tk.Label(text_frame, text="70%", font=("Segoe UI", 9, "bold"), width=5)
+        self.sim_value_lbl = ttk.Label(text_frame, text="70%", font=("Segoe UI", 9, "bold"), width=5)
 
         def update_sim_lbl(val):
             self.sim_value_lbl.config(text=f"{float(val):.0f}%")
@@ -229,14 +230,14 @@ class SearchTab(tk.Frame):
         self.sim_value_lbl.pack(side="left")
 
         # Image Match Threshold
-        img_frame = tk.Frame(sim_frame)
+        img_frame = ttk.Frame(sim_frame)
         img_frame.pack(side="left", fill="x", expand=True)
 
-        img_lbl = tk.Label(img_frame, text="Image:")
+        img_lbl = ttk.Label(img_frame, text="Image:")
         img_lbl.pack(side="left", padx=(0, 5))
 
         self.img_sim_var = tk.DoubleVar(value=0.20)
-        self.img_sim_value_lbl = tk.Label(img_frame, text="0.20", font=("Segoe UI", 9, "bold"), width=5)
+        self.img_sim_value_lbl = ttk.Label(img_frame, text="0.20", font=("Segoe UI", 9, "bold"), width=5)
 
         def update_img_sim_lbl(val):
             self.img_sim_value_lbl.config(text=f"{float(val):.2f}")
@@ -246,40 +247,41 @@ class SearchTab(tk.Frame):
         self.img_sim_value_lbl.pack(side="left")
         
         # Progress Bar & Status Row
-        self.progress_frame = tk.Frame(main_frame)
+        self.progress_frame = ttk.Frame(main_frame)
         self.progress_frame.pack(fill="x", pady=10)
         
         self.status_var = tk.StringVar(value="Ready to start search.")
-        self.status_lbl = tk.Label(self.progress_frame, textvariable=self.status_var, font=("Segoe UI", 9, "italic"))
+        self.status_lbl = ttk.Label(self.progress_frame, textvariable=self.status_var, font=("Segoe UI", 9, "italic"))
         self.status_lbl.pack(anchor="w", pady=2)
         
         self.progress = ttk.Progressbar(self.progress_frame, mode="indeterminate")
         self.progress.pack(fill="x", pady=2)
         
         # Action Buttons
-        btn_frame = tk.Frame(main_frame)
+        btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(fill="x", pady=5)
         
-        self.run_btn = tk.Button(btn_frame, text="Find Duplicate Listings", command=self.start_matching_thread, font=("Segoe UI", 11, "bold"), height=2)
-        self.run_btn.pack(fill="x", side="left", expand=True, padx=5)
+        self.run_btn = ttk.Button(btn_frame, text="Find Duplicate Listings", command=self.start_matching_thread)
+        self.run_btn.pack(side="left", expand=True, fill="x", padx=5)
         
-        self.view_btn = tk.Button(btn_frame, text="View Results (HTML)", command=self.open_last_results, font=("Segoe UI", 11, "bold"), height=2)
-        self.view_btn.pack(fill="x", side="left", expand=True, padx=5)
+        self.view_btn = ttk.Button(btn_frame, text="View Results (HTML)", command=self.open_last_results)
+        self.view_btn.pack(side="left", expand=True, fill="x", padx=5)
         
-        self.close_btn = tk.Button(btn_frame, text="Close Tab", command=self.close_tab, font=("Segoe UI", 11, "bold"), height=2)
-        self.close_btn.pack(fill="x", side="left", expand=True, padx=5)
+        self.close_btn = ttk.Button(btn_frame, text="Close Tab", command=self.close_tab)
+        self.close_btn.pack(side="left", expand=True, fill="x", padx=5)
         
         # Log Panel
-        log_lbl = tk.Label(main_frame, text="Execution Log:", font=("Segoe UI", 9, "bold"))
+        log_lbl = ttk.Label(main_frame, text="Execution Log:", font=("Segoe UI", 9, "bold"))
         log_lbl.pack(anchor="w", pady=(15, 2))
         
-        log_frame = tk.Frame(main_frame, bd=1, relief="sunken")
+        log_frame = ttk.Frame(main_frame, borderwidth=1, relief="sunken")
         log_frame.pack(fill="both", expand=True, pady=5)
         
+        # Text is kept as tk.Text (no ttk.Text exists)
         self.log_text = tk.Text(log_frame, font=("Consolas", 9), wrap="word", height=8)
         self.log_text.pack(side="left", fill="both", expand=True, padx=5, pady=5)
         
-        scrollbar = tk.Scrollbar(log_frame, command=self.log_text.yview)
+        scrollbar = ttk.Scrollbar(log_frame, command=self.log_text.yview)
         scrollbar.pack(side="right", fill="y")
         self.log_text.config(yscrollcommand=scrollbar.set)
         
@@ -310,7 +312,7 @@ class SearchTab(tk.Frame):
         self.selected_images = paths
 
         if not paths:
-            self.placeholder_label = tk.Label(self.thumbnail_container, text="No images selected. Click Browse...", font=("Segoe UI", 9, "italic"), fg="gray")
+            self.placeholder_label = ttk.Label(self.thumbnail_container, text="No images selected. Click Browse...", font=("Segoe UI", 9, "italic"))
             self.placeholder_label.pack(side="left", padx=5)
             return
 
@@ -327,6 +329,7 @@ class SearchTab(tk.Frame):
                 photo = ImageTk.PhotoImage(img)
                 self.preview_photos.append(photo)
 
+                # Keep small overlay close tag as tk.Label to support custom coloring
                 img_label = tk.Label(item_frame, image=photo, bg="white")
                 img_label.pack(fill="both", expand=True, padx=1, pady=1)
 
@@ -495,10 +498,10 @@ class DuplicateFinderGUI:
         self.root.geometry(f"1100x{window_height}")
         
         # Add new tab button header
-        top_bar = tk.Frame(root)
+        top_bar = ttk.Frame(root)
         top_bar.pack(fill="x", padx=15, pady=5)
         
-        add_tab_btn = tk.Button(top_bar, text="+ Add New Search Tab", command=self.add_search_tab, font=("Segoe UI", 10, "bold"))
+        add_tab_btn = ttk.Button(top_bar, text="+ Add New Search Tab", command=self.add_search_tab)
         add_tab_btn.pack(side="left", padx=5, pady=5)
         
         # Notebook Layout
@@ -520,6 +523,16 @@ class DuplicateFinderGUI:
 
 
 if __name__ == "__main__":
+    # Apply standard native look and feel styling configurations
     root = tk.Tk()
+    style = ttk.Style(root)
+    # Use native theme based on operating system
+    if sys.platform.startswith("darwin"):
+        style.theme_use("aqua")
+    elif sys.platform.startswith("win"):
+        style.theme_use("vista")
+    else:
+        style.theme_use("clam")
+        
     app = DuplicateFinderGUI(root)
     root.mainloop()
