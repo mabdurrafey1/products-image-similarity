@@ -1,6 +1,5 @@
 import os
 import sys
-
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import threading
@@ -8,7 +7,6 @@ import webbrowser
 import match_image_ai
 import generate_report
 from PIL import Image, ImageTk
-
 import re
 
 class CustomStdout:
@@ -44,10 +42,8 @@ class CustomStdout:
                     self.status_var.set(f"Scanning & indexing images: {percentage}%...")
             
             # Print minimal progress info to log to avoid bloating the text box
-            # only if it contains actual stats and not just empty spaces
             clean = text.replace('\r', '').strip()
             if clean and ('%' in clean or 'it/s' in clean):
-                # We update the last line if possible, or just skip log-spam entirely to prevent freeze
                 pass
             return
 
@@ -74,20 +70,45 @@ class CustomStdout:
     def flush(self):
         pass
 
-class DuplicateFinderGUI:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("AI Product Duplicate Finder")
-        screen_height = self.root.winfo_screenheight()
-        window_height = max(700, screen_height - 100)
-        self.root.geometry(f"1100x{window_height}")
+# Thread-safe stdout/stderr redirector to handle parallel execution logs correctly
+class ThreadSafeStdoutRedirector:
+    def __init__(self, original_stdout):
+        self.original_stdout = original_stdout
+        self.redirectors = {} # thread_id -> CustomStdout
+
+    def write(self, message):
+        tid = threading.get_ident()
+        if tid in self.redirectors:
+            self.redirectors[tid].write(message)
+        else:
+            self.original_stdout.write(message)
+
+    def flush(self):
+        for r in self.redirectors.values():
+            try:
+                r.flush()
+            except Exception:
+                pass
+        self.original_stdout.flush()
+
+thread_safe_stdout = ThreadSafeStdoutRedirector(sys.stdout)
+thread_safe_stderr = ThreadSafeStdoutRedirector(sys.stderr)
+sys.stdout = thread_safe_stdout
+sys.stderr = thread_safe_stderr
+
+class SearchTab(tk.Frame):
+    def __init__(self, parent, tab_id, main_app):
+        super().__init__(parent)
+        self.tab_id = tab_id
+        self.main_app = main_app
+        self.is_running = False
         
-        # Main Layout Container
-        main_frame = tk.Frame(root)
-        main_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        # Container frame inside tab
+        main_frame = tk.Frame(self)
+        main_frame.pack(fill="both", expand=True, padx=15, pady=10)
         
         # Form Card Frame
-        form_card = tk.LabelFrame(main_frame, text=" AI Search Parameters ", font=("Segoe UI", 10, "bold"), padx=15, pady=15)
+        form_card = tk.LabelFrame(main_frame, text=f" Search Parameters (Tab #{self.tab_id}) ", font=("Segoe UI", 10, "bold"), padx=15, pady=15)
         form_card.pack(fill="x", pady=5)
         
         # 1. Query Image Selection Row
@@ -162,7 +183,7 @@ class DuplicateFinderGUI:
         settings_frame.grid(row=4, column=0, columnspan=3, pady=10, sticky="w", padx=5)
         
         self.strict_var = tk.BooleanVar(value=False)
-        strict_cb = tk.Checkbutton(settings_frame, text="Enforce Strict Model Matching", variable=self.strict_var)
+        strict_cb = tk.Checkbutton(settings_frame, text="Strict Model Matching", variable=self.strict_var)
         strict_cb.pack(side="left", padx=5)
         
         self.no_indexing_var = tk.BooleanVar(value=False)
@@ -176,10 +197,10 @@ class DuplicateFinderGUI:
         top_spinner = tk.Spinbox(settings_frame, from_=5, to=2000, width=5, textvariable=self.top_var)
         top_spinner.pack(side="left", padx=5)
 
-        workers_lbl = tk.Label(settings_frame, text="Download Workers:")
+        workers_lbl = tk.Label(settings_frame, text="Workers:")
         workers_lbl.pack(side="left", padx=(10, 5))
 
-        self.workers_var = tk.StringVar(value="30")
+        self.workers_var = tk.StringVar(value="10")
         workers_spinner = tk.Spinbox(settings_frame, from_=1, to=100, width=5, textvariable=self.workers_var)
         workers_spinner.pack(side="left", padx=5)
 
@@ -190,7 +211,7 @@ class DuplicateFinderGUI:
         sim_frame = tk.Frame(form_card)
         sim_frame.grid(row=5, column=1, columnspan=2, sticky="we", padx=5, pady=10)
 
-        # Text Match Threshold Sub-Frame (Left side)
+        # Text Match Threshold
         text_frame = tk.Frame(sim_frame)
         text_frame.pack(side="left", fill="x", expand=True, padx=(0, 15))
 
@@ -207,7 +228,7 @@ class DuplicateFinderGUI:
         self.sim_slider.pack(side="left", fill="x", expand=True, padx=(0, 5))
         self.sim_value_lbl.pack(side="left")
 
-        # Image Match Threshold Sub-Frame (Right side)
+        # Image Match Threshold
         img_frame = tk.Frame(sim_frame)
         img_frame.pack(side="left", fill="x", expand=True)
 
@@ -239,11 +260,14 @@ class DuplicateFinderGUI:
         btn_frame = tk.Frame(main_frame)
         btn_frame.pack(fill="x", pady=5)
         
-        self.run_btn = tk.Button(btn_frame, text="Find Duplicate Listings", command=self.start_matching_thread, font=("Segoe UI", 11, "bold"), height=2)
+        self.run_btn = tk.Button(btn_frame, text="Find Duplicate Listings", command=self.start_matching_thread, font=("Segoe UI", 11, "bold"), height=2, bg="#3b82f6", fg="white", activebackground="#2563eb")
         self.run_btn.pack(fill="x", side="left", expand=True, padx=5)
         
-        self.view_btn = tk.Button(btn_frame, text="View Last Results (HTML)", command=self.open_last_results, font=("Segoe UI", 11, "bold"), height=2)
+        self.view_btn = tk.Button(btn_frame, text="View Results (HTML)", command=self.open_last_results, font=("Segoe UI", 11, "bold"), height=2)
         self.view_btn.pack(fill="x", side="left", expand=True, padx=5)
+        
+        self.close_btn = tk.Button(btn_frame, text="Close Tab", command=self.close_tab, font=("Segoe UI", 11, "bold"), height=2, bg="#ef4444", fg="white", activebackground="#dc2626")
+        self.close_btn.pack(fill="x", side="left", expand=True, padx=5)
         
         # Log Panel
         log_lbl = tk.Label(main_frame, text="Execution Log:", font=("Segoe UI", 9, "bold"))
@@ -252,14 +276,13 @@ class DuplicateFinderGUI:
         log_frame = tk.Frame(main_frame, bd=1, relief="sunken")
         log_frame.pack(fill="both", expand=True, pady=5)
         
-        self.log_text = tk.Text(log_frame, font=("Consolas", 9), wrap="word")
+        self.log_text = tk.Text(log_frame, font=("Consolas", 9), wrap="word", height=8)
         self.log_text.pack(side="left", fill="both", expand=True, padx=5, pady=5)
         
         scrollbar = tk.Scrollbar(log_frame, command=self.log_text.yview)
         scrollbar.pack(side="right", fill="y")
         self.log_text.config(yscrollcommand=scrollbar.set)
         
-        # Grid weight settings for responsiveness
         form_card.columnconfigure(1, weight=1)
 
     def browse_image(self):
@@ -278,12 +301,10 @@ class DuplicateFinderGUI:
             self.image_path_var.set(";".join(self.selected_images))
 
     def update_preview(self):
-        # Clear existing widgets in the container
         for widget in self.thumbnail_container.winfo_children():
             widget.destroy()
         self.preview_photos.clear()
 
-        # Read paths from trace variable
         paths_str = self.image_path_var.get().strip()
         paths = [p.strip() for p in paths_str.split(";") if p.strip()]
         self.selected_images = paths
@@ -297,22 +318,18 @@ class DuplicateFinderGUI:
             if not os.path.exists(path):
                 continue
             try:
-                # Create a small container frame for each thumbnail
                 item_frame = tk.Frame(self.thumbnail_container, width=72, height=72, bg="#dcdcdc")
                 item_frame.pack_propagate(False)
                 item_frame.pack(side="left", padx=6)
 
-                # Resize image to fit inside the frame
                 img = Image.open(path)
                 img.thumbnail((62, 62))
                 photo = ImageTk.PhotoImage(img)
                 self.preview_photos.append(photo)
 
-                # Render image inside a label
                 img_label = tk.Label(item_frame, image=photo, bg="white")
                 img_label.pack(fill="both", expand=True, padx=1, pady=1)
 
-                # Close button on top-right of thumbnail (rendered on top of image label)
                 close_btn = tk.Label(
                     img_label, text="×", bg="#ff4d4d", fg="white",
                     font=("Segoe UI", 9, "bold"), cursor="hand2", bd=0
@@ -328,13 +345,16 @@ class DuplicateFinderGUI:
             self.image_path_var.set(";".join(self.selected_images))
 
     def open_last_results(self):
-        html_path = os.path.abspath("temp/search_results.html")
+        html_path = os.path.abspath(f"temp/search_results_{self.tab_id}.html")
         if os.path.exists(html_path):
             webbrowser.open(f"file:///{html_path}")
         else:
-            messagebox.showwarning("No Results", "No generated temp/search_results.html file was found. Run a search first.")
+            messagebox.showwarning("No Results", f"No generated temp/search_results_{self.tab_id}.html file was found. Run a search first.")
 
     def start_matching_thread(self):
+        if self.is_running:
+            return
+            
         query_image = self.image_path_var.get().strip()
         query_title = self.title_text.get("1.0", tk.END).strip()
         
@@ -342,21 +362,19 @@ class DuplicateFinderGUI:
             messagebox.showerror("Error", "Please select a product query image first.")
             return
             
-        # Verify each individual path exists
         image_paths = [p.strip() for p in query_image.split(";") if p.strip()]
         for p in image_paths:
             if not os.path.exists(p):
                 messagebox.showerror("Error", f"Selected image path does not exist:\n{p}")
                 return
             
-        # Disable inputs and clear log
+        self.is_running = True
         self.run_btn.config(state="disabled")
         self.progress.start(10)
         self.status_var.set("Initializing AI search model & calculating embeddings...")
         self.log_text.delete("1.0", tk.END)
-        self.append_log("Starting AI Product Duplicate Finder...\n")
+        self.append_log(f"Starting AI Product Duplicate Finder (Tab #{self.tab_id})...\n")
         
-        # Start executing the python script in a background thread
         thread = threading.Thread(target=self.run_matching_search, args=(query_image, query_title))
         thread.daemon = True
         thread.start()
@@ -366,10 +384,15 @@ class DuplicateFinderGUI:
         self.log_text.see(tk.END)
 
     def run_matching_search(self, image_path, query_title):
+        tid = threading.get_ident()
+        redirector = CustomStdout(self.main_app.root, self.log_text, self.status_var, self.progress)
+        
+        # Register thread redirection
+        thread_safe_stdout.redirectors[tid] = redirector
+        thread_safe_stderr.redirectors[tid] = redirector
+        
         try:
-            # Create temp directory if it doesn't exist
             os.makedirs("temp", exist_ok=True)
-            
             selected_excel_name = self.selected_excel_var.get().strip()
             excel_path = os.path.join("input_data", selected_excel_name)
             
@@ -379,7 +402,7 @@ class DuplicateFinderGUI:
                 "--query", image_path,
                 "--query-title", query_title,
                 "--input", excel_path,
-                "--output", "temp/search_results_ai.json",
+                "--output", f"temp/search_results_ai_{self.tab_id}.json",
                 "--workers", self.workers_var.get(),
                 "--top", self.top_var.get(),
                 "--min-text-sim", f"{self.text_sim_var.get() / 100.0:.2f}",
@@ -397,46 +420,40 @@ class DuplicateFinderGUI:
             if self.no_indexing_var.get():
                 sys.argv.append("--no-indexing")
 
-            self.root.after(0, self.status_var.set, "Running AI visual search...")
-            
-            # Redirect stdout/stderr to the GUI log window
-            redirector = CustomStdout(self.root, self.log_text, self.status_var, self.progress)
+            self.main_app.root.after(0, self.status_var.set, "Running AI visual search...")
             
             try:
-                sys.stdout = redirector
-                sys.stderr = redirector
-                
                 # Execute match_image_ai main method
                 match_image_ai.main()
                 
                 # Execute generate_report html generator
-                self.root.after(0, self.status_var.set, "Compiling search matches into HTML dashboard...")
-                self.root.after(0, self.append_log, "Generating temp/search_results.html report...\n")
+                self.main_app.root.after(0, self.status_var.set, "Compiling search matches into HTML dashboard...")
+                self.main_app.root.after(0, self.append_log, f"Generating temp/search_results_{self.tab_id}.html report...\n")
                 
                 generate_report.generate_html_report(
-                    json_path="temp/search_results_ai.json",
-                    output_html="temp/search_results.html",
+                    json_path=f"temp/search_results_ai_{self.tab_id}.json",
+                    output_html=f"temp/search_results_{self.tab_id}.html",
                     excel_path=excel_path
                 )
             finally:
                 sys.argv = old_argv
-                sys.stdout = sys.__stdout__
-                sys.stderr = sys.__stderr__
 
-            # Succeeded!
-            self.root.after(0, self.on_search_success)
+            self.main_app.root.after(0, self.on_search_success)
             
         except Exception as e:
-            self.root.after(0, lambda err=str(e): self.on_search_error(err))
+            self.main_app.root.after(0, lambda err=str(e): self.on_search_error(err))
+        finally:
+            thread_safe_stdout.redirectors.pop(tid, None)
+            thread_safe_stderr.redirectors.pop(tid, None)
+            self.is_running = False
 
     def on_search_success(self):
         self.progress.stop()
         self.run_btn.config(state="normal")
-        self.status_var.set("Search complete! Matches saved to temp/search_results.html")
+        self.status_var.set(f"Search complete! Matches saved to temp/search_results_{self.tab_id}.html")
         self.append_log("\n[SUCCESS] AI Duplicate Finder completed successfully.\n")
         
-        # Prompt to show results
-        if messagebox.askyesno("Search Complete", "AI search matching finished successfully!\n\nWould you like to open the HTML results dashboard in your browser?"):
+        if messagebox.askyesno("Search Complete", f"AI search matching finished successfully for Tab #{self.tab_id}!\n\nWould you like to open the HTML results dashboard in your browser?"):
             self.open_last_results()
 
     def on_search_error(self, error_msg):
@@ -445,6 +462,48 @@ class DuplicateFinderGUI:
         self.status_var.set("Error occurred during search matching.")
         self.append_log(f"\n[ERROR] Process failed:\n{error_msg}\n")
         messagebox.showerror("Error During Matching", f"An error occurred:\n\n{error_msg}")
+
+    def close_tab(self):
+        if self.is_running:
+            if not messagebox.askyesno("Confirm Close", f"Search is currently running in Tab #{self.tab_id}.\nAre you sure you want to stop/close this tab?"):
+                return
+        self.main_app.tabs.remove(self)
+        self.destroy()
+
+
+class DuplicateFinderGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("AI Product Duplicate Finder")
+        
+        screen_height = self.root.winfo_screenheight()
+        window_height = max(700, screen_height - 100)
+        self.root.geometry(f"1100x{window_height}")
+        
+        # Add new tab button header
+        top_bar = tk.Frame(root)
+        top_bar.pack(fill="x", padx=15, pady=5)
+        
+        add_tab_btn = tk.Button(top_bar, text="+ Add New Search Tab", command=self.add_search_tab, font=("Segoe UI", 10, "bold"), bg="#10b981", fg="white", activebackground="#059669")
+        add_tab_btn.pack(side="left", padx=5, pady=5)
+        
+        # Notebook Layout
+        self.notebook = ttk.Notebook(root)
+        self.notebook.pack(fill="both", expand=True, padx=15, pady=5)
+        
+        self.tabs = []
+        self.tab_counter = 0
+        
+        # Add initial search tab
+        self.add_search_tab()
+
+    def add_search_tab(self):
+        self.tab_counter += 1
+        new_tab = SearchTab(self.notebook, self.tab_counter, self)
+        self.tabs.append(new_tab)
+        self.notebook.add(new_tab, text=f"Search Tab #{self.tab_counter}")
+        self.notebook.select(new_tab)
+
 
 if __name__ == "__main__":
     root = tk.Tk()
