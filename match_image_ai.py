@@ -424,7 +424,7 @@ def main():
     parser.add_argument("--strict", action="store_true", help="Enforce strict alphanumeric model code matching")
     parser.add_argument("--query-title", default="", help="Pasted title text to use as reference baseline for semantic text similarity")
     parser.add_argument("--image-dir", default="downloaded_images", help="Directory where database images are stored")
-    parser.add_argument("--workers", type=int, default=30, help="Number of download workers")
+    parser.add_argument("--workers", type=int, default=10, help="Number of download workers")
     parser.add_argument("--no-indexing", action="store_true", help="Skip checking/indexing images in the target directory")
     parser.add_argument("--min-price", type=float, default=None, help="Minimum product price threshold")
     parser.add_argument("--max-price", type=float, default=None, help="Maximum product price threshold")

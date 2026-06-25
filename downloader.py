@@ -2,7 +2,7 @@ import os
 import requests
 from concurrent.futures import ThreadPoolExecutor
 
-def download_missing_images(df, image_dir="downloaded_images", max_workers=30):
+def download_missing_images(df, image_dir="downloaded_images", max_workers=10):
     """
     Checks the loaded pandas DataFrame for product SKU and Image URL values,
     and concurrently downloads any images that are not cached locally.
@@ -32,6 +32,21 @@ def download_missing_images(df, image_dir="downloaded_images", max_workers=30):
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
         import threading
+        from urllib3.util import Retry
+        from requests.adapters import HTTPAdapter
+        
+        # Set up a thread-safe requests Session with retries
+        session = requests.Session()
+        retries = Retry(
+            total=3,
+            backoff_factor=0.5,
+            status_forcelist=[500, 502, 503, 504],
+            raise_on_status=False
+        )
+        adapter = HTTPAdapter(max_retries=retries, pool_maxsize=max_workers, pool_block=False)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        
         progress_lock = threading.Lock()
         completed = 0
         total = len(download_tasks)
@@ -40,7 +55,7 @@ def download_missing_images(df, image_dir="downloaded_images", max_workers=30):
             nonlocal completed
             sku, url, dest = task
             try:
-                r = requests.get(url, headers=headers, timeout=15)
+                r = session.get(url, headers=headers, timeout=15)
                 if r.status_code == 200:
                     # Check if the response is actually an image and not an HTML error page
                     content_type = r.headers.get('Content-Type', '').lower()
