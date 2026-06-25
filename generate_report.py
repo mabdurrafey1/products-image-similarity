@@ -645,6 +645,8 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                 <label class="sidebar-label">SORT BY</label>
                 <select id="sortBy" class="sidebar-select" onchange="applyFilters()">
                     <option value="rank">Rank / AI Score</option>
+                    <option value="vs-desc">VS (Visual Score)</option>
+                    <option value="tx-desc">TX (Text Score)</option>
                     <option value="price-desc">Price: High to Low</option>
                     <option value="price-asc">Price: Low to High</option>
                 </select>
@@ -745,7 +747,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
 
         # Build card template
         html_content += f"""
-            <div class="match-card" data-sku="{sku}" data-zsku="{zsku}" data-rank="{rank}">
+            <div class="match-card" data-sku="{sku}" data-zsku="{zsku}" data-rank="{rank}" data-vs="{ai_score if ai_score is not None else 0}" data-tx="{text_sim if text_sim is not None else 0}">
                 <!-- Checkbox Row -->
                 <div class="card-select-row" style="display: flex; justify-content: space-between; align-items: center;">
                     <label>
@@ -933,6 +935,14 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                     const rankA = parseInt(a.getAttribute('data-rank')) || 9999;
                     const rankB = parseInt(b.getAttribute('data-rank')) || 9999;
                     return rankA - rankB;
+                } else if (sortBy === 'vs-desc') {
+                    const vsA = parseFloat(a.getAttribute('data-vs')) || 0;
+                    const vsB = parseFloat(b.getAttribute('data-vs')) || 0;
+                    return vsB - vsA;
+                } else if (sortBy === 'tx-desc') {
+                    const txA = parseFloat(a.getAttribute('data-tx')) || 0;
+                    const txB = parseFloat(b.getAttribute('data-tx')) || 0;
+                    return txB - txA;
                 } else if (sortBy === 'price-desc') {
                     const priceBadgeA = a.querySelector('.pill-price');
                     const priceBadgeB = b.querySelector('.pill-price');
