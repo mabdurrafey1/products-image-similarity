@@ -425,23 +425,27 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
         }
 
         .pill-price {
-            background: var(--color-green);
-            color: white;
+            background: #dcfce7;
+            color: #15803d;
+            border: 1px solid #bbf7d0;
         }
 
         .pill-dark {
-            background: var(--color-grey-dark);
-            color: white;
+            background: #f1f5f9;
+            color: #475569;
+            border: 1px solid #e2e8f0;
         }
 
         .pill-visual {
-            background: #6366f1;
-            color: white;
+            background: #e0e7ff;
+            color: #4338ca;
+            border: 1px solid #c7d2fe;
         }
 
         .pill-text {
-            background: #db2777;
-            color: white;
+            background: #fce7f3;
+            color: #be185d;
+            border: 1px solid #fbcfe8;
         }
 
         /* Product Title */
@@ -594,28 +598,30 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
         }
 
         .btn-view {
-            background: var(--color-blue);
-            color: white;
+            background: #eff6ff;
+            color: #2563eb;
+            border: 1px solid #bfdbfe;
         }
         .btn-view:hover {
-            background: #1d4ed8;
+            background: #dbeafe;
         }
 
         .btn-open {
-            background: var(--color-green);
-            color: white;
+            background: #f0fdf4;
+            color: #16a34a;
+            border: 1px solid #bbf7d0;
         }
         .btn-open:hover {
-            background: #059669;
+            background: #dcfce7;
         }
 
         .btn-copy {
-            background: var(--color-grey-light);
-            color: var(--color-grey-dark);
-            border: 1px solid var(--border-color);
+            background: #f8fafc;
+            color: #475569;
+            border: 1px solid #e2e8f0;
         }
         .btn-copy:hover {
-            background: #e5e7eb;
+            background: #f1f5f9;
         }
 
         /* Alert/Notification Box */
@@ -795,7 +801,11 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                 </div>
 
                 <!-- Main Image -->
-                <div class="image-container">
+                <div class="image-container" style="position: relative;">
+                    <div class="verify-badge-overlay" style="position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; pointer-events: none; z-index: 10;">
+                        <span class="verify-dot" title="URL Ready" style="background: #22c55e; width: 8px; height: 8px; border-radius: 50%; display: inline-block; box-shadow: 0 0 0 2px #fff;"></span>
+                        <span class="verify-dot" title="Image Ready" style="background: #22c55e; width: 8px; height: 8px; border-radius: 50%; display: inline-block; box-shadow: 0 0 0 2px #fff;"></span>
+                    </div>
                     <img id="mainImg_{sku}" src="{html_image_path}" alt="{title}" onerror="this.src='https://placehold.co/300x300/121829/ffffff?text=Image+Not+Found'">
                 </div>
 
@@ -816,24 +826,18 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                     <span class="tag-pill">{img_count} imgs</span>
                 </div>
 
-                <!-- SKU Table Box -->
-                <div class="sku-box">
-                    <div class="sku-row">
-                        <span class="sku-label">SKU</span>
-                        <span class="sku-val" id="skuText_{sku}">{sku}</span>
-                        <button class="copy-btn" onclick="copyText('skuText_{sku}')">Copy</button>
+                <!-- SKU Container -->
+                <div class="sku-container" style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px;">
+                    <div class="sku-pill" onclick="copyTextDirect('{sku}')" title="Click to copy SKU" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 5px 8px; display: flex; align-items: center; justify-content: space-between; font-size: 0.72rem; cursor: pointer; transition: all 0.15s ease;">
+                        <span class="sku-pill-label" style="font-weight: 700; color: #64748b;">SKU:</span>
+                        <span class="sku-pill-val" style="font-family: monospace; color: #334155; font-weight: 500; margin-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px;">{sku}</span>
+                        <span class="sku-copy-icon" style="font-size: 0.65rem; color: #94a3b8; margin-left: auto;">📋</span>
                     </div>
-                    <div class="sku-row">
-                        <span class="sku-label">ZSKU</span>
-                        <span class="sku-val" id="zskuText_{sku}">{zsku}</span>
-                        <button class="copy-btn" onclick="copyText('zskuText_{sku}')">Copy</button>
+                    <div class="sku-pill" onclick="copyTextDirect('{zsku}')" title="Click to copy ZSKU" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 5px 8px; display: flex; align-items: center; justify-content: space-between; font-size: 0.72rem; cursor: pointer; transition: all 0.15s ease;">
+                        <span class="sku-pill-label" style="font-weight: 700; color: #64748b;">ZSKU:</span>
+                        <span class="sku-pill-val" style="font-family: monospace; color: #334155; font-weight: 500; margin-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px;">{zsku}</span>
+                        <span class="sku-copy-icon" style="font-size: 0.65rem; color: #94a3b8; margin-left: auto;">📋</span>
                     </div>
-                </div>
-
-                <!-- Verification Badges -->
-                <div class="verification-row">
-                    <span class="verify-badge" style="background:#d1fae5; color:#065f46;">URL Ready</span>
-                    <span class="verify-badge" style="background:#d1fae5; color:#065f46;">Image Ready</span>
                 </div>
 
                 <!-- Thumbnails Row -->
