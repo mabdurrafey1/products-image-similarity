@@ -78,7 +78,9 @@ class DuplicateFinderGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("AI Product Duplicate Finder")
-        self.root.geometry("1100x1000")
+        screen_height = self.root.winfo_screenheight()
+        window_height = max(700, screen_height - 100)
+        self.root.geometry(f"1100x{window_height}")
         
         # Main Layout Container
         main_frame = tk.Frame(root)
