@@ -267,8 +267,7 @@ class SearchTab(ttk.Frame):
         self.view_btn = ttk.Button(btn_frame, text="View Results (HTML)", command=self.open_last_results)
         self.view_btn.pack(side="left", expand=True, fill="x", padx=5)
         
-        self.close_btn = ttk.Button(btn_frame, text="Close Tab", command=self.close_tab)
-        self.close_btn.pack(side="left", expand=True, fill="x", padx=5)
+
         
         # Log Panel
         log_lbl = ttk.Label(main_frame, text="Execution Log:", font=("Segoe UI", 9, "bold"))
@@ -480,14 +479,6 @@ class SearchTab(ttk.Frame):
         self.append_log(f"\n[ERROR] Process failed:\n{error_msg}\n")
         messagebox.showerror("Error During Matching", f"An error occurred:\n\n{error_msg}")
 
-    def close_tab(self):
-        if self.is_running:
-            if not messagebox.askyesno("Confirm Close", f"Search is currently running in Tab #{self.tab_id}.\nAre you sure you want to stop/close this tab?"):
-                return
-        self.main_app.tabs.remove(self)
-        self.destroy()
-
-
 class DuplicateFinderGUI:
     def __init__(self, root):
         self.root = root
@@ -497,29 +488,8 @@ class DuplicateFinderGUI:
         window_height = max(700, screen_height - 100)
         self.root.geometry(f"1100x{window_height}")
         
-        # Add new tab button header
-        top_bar = ttk.Frame(root)
-        top_bar.pack(fill="x", padx=15, pady=5)
-        
-        add_tab_btn = ttk.Button(top_bar, text="+ Add New Search Tab", command=self.add_search_tab)
-        add_tab_btn.pack(side="left", padx=5, pady=5)
-        
-        # Notebook Layout
-        self.notebook = ttk.Notebook(root)
-        self.notebook.pack(fill="both", expand=True, padx=15, pady=5)
-        
-        self.tabs = []
-        self.tab_counter = 0
-        
-        # Add initial search tab
-        self.add_search_tab()
-
-    def add_search_tab(self):
-        self.tab_counter += 1
-        new_tab = SearchTab(self.notebook, self.tab_counter, self)
-        self.tabs.append(new_tab)
-        self.notebook.add(new_tab, text=f"Search Tab #{self.tab_counter}")
-        self.notebook.select(new_tab)
+        self.search_tab = SearchTab(root, 1, self)
+        self.search_tab.pack(fill="both", expand=True)
 
 
 if __name__ == "__main__":
