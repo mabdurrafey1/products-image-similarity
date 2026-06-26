@@ -87,12 +87,11 @@ def get_title_similarity(title_a, title_b):
     return overlap_ratio
 
 def clean_image_cache(image_dir):
-    """Clean up empty or corrupted images in image_dir."""
+    """Clean up empty images in image_dir."""
     if not os.path.exists(image_dir):
         return
-    print("Verifying cached database images (removing empty or corrupted files)...")
+    print("Verifying cached database images (removing empty files)...")
     corrupted_count = 0
-    from PIL import Image
     for f in os.listdir(image_dir):
         fpath = os.path.join(image_dir, f)
         if not os.path.isfile(fpath) or f.startswith('.'):
@@ -103,18 +102,8 @@ def clean_image_cache(image_dir):
                 corrupted_count += 1
             except Exception:
                 pass
-            continue
-        try:
-            with Image.open(fpath) as img:
-                img.verify()
-        except Exception:
-            try:
-                os.remove(fpath)
-                corrupted_count += 1
-            except Exception:
-                pass
     if corrupted_count > 0:
-        print(f"Removed {corrupted_count} corrupted or empty images from cache.\n")
+        print(f"Removed {corrupted_count} empty images from cache.\n")
 
 def normalize_dataframe(df):
     """Normalize column names from the final Excel layout format."""
