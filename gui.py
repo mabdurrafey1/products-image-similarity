@@ -110,6 +110,10 @@ class SearchTab(ttk.Frame):
         self.main_app = main_app
         self.is_running = False
         
+        # Configure stop button style
+        style = ttk.Style()
+        style.configure("Stop.TButton", foreground="#ef4444", font=("Segoe UI", 9, "bold"))
+        
         # Container frame inside tab
         main_frame = ttk.Frame(self)
         main_frame.pack(fill="both", expand=True, padx=15, pady=10)
@@ -277,12 +281,7 @@ class SearchTab(ttk.Frame):
         self.view_btn = ttk.Button(btn_frame, text="View Results (HTML)", command=self.open_last_results)
         self.view_btn.pack(side="left", expand=True, fill="x", padx=5)
         
-        self.stop_btn = tk.Button(
-            btn_frame, text="Stop Execution", command=self.stop_matching,
-            bg="#ef4444", fg="white", activebackground="#dc2626", activeforeground="white",
-            font=("Segoe UI", 9, "bold"), bd=0, highlightthickness=0,
-            padx=10, pady=4
-        )
+        self.stop_btn = ttk.Button(btn_frame, text="Stop Execution", command=self.stop_matching, style="Stop.TButton")
         self.stop_btn.pack(side="left", expand=True, fill="x", padx=5)
         self.stop_btn.config(state="disabled")
         
