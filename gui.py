@@ -80,8 +80,11 @@ class ThreadSafeStdoutRedirector:
         tid = threading.get_ident()
         if tid in self.redirectors:
             self.redirectors[tid].write(message)
-        else:
-            self.original_stdout.write(message)
+        elif self.original_stdout is not None:
+            try:
+                self.original_stdout.write(message)
+            except Exception:
+                pass
 
     def flush(self):
         for r in self.redirectors.values():
@@ -89,7 +92,11 @@ class ThreadSafeStdoutRedirector:
                 r.flush()
             except Exception:
                 pass
-        self.original_stdout.flush()
+        if self.original_stdout is not None:
+            try:
+                self.original_stdout.flush()
+            except Exception:
+                pass
 
 thread_safe_stdout = ThreadSafeStdoutRedirector(sys.stdout)
 thread_safe_stderr = ThreadSafeStdoutRedirector(sys.stderr)
