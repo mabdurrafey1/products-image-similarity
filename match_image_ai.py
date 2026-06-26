@@ -86,24 +86,6 @@ def get_title_similarity(title_a, title_b):
     overlap_ratio = len(intersection) / min(len(words_a), len(words_b))
     return overlap_ratio
 
-def clean_image_cache(image_dir):
-    """Clean up empty images in image_dir."""
-    if not os.path.exists(image_dir):
-        return
-    print("Verifying cached database images (removing empty files)...")
-    corrupted_count = 0
-    for f in os.listdir(image_dir):
-        fpath = os.path.join(image_dir, f)
-        if not os.path.isfile(fpath) or f.startswith('.'):
-            continue
-        if os.path.getsize(fpath) == 0:
-            try:
-                os.remove(fpath)
-                corrupted_count += 1
-            except Exception:
-                pass
-    if corrupted_count > 0:
-        print(f"Removed {corrupted_count} empty images from cache.\n")
 
 def normalize_dataframe(df):
     """Normalize column names from the final Excel layout format."""
@@ -470,8 +452,6 @@ def main():
     # 2. Resolve query reference title for similarity checks
     reference_title = resolve_reference_title(df, args.query, args.query_title)
 
-    # 3. Clean corrupted image files from directory
-    clean_image_cache(args.image_dir)
 
     # 4. Filter downloader queue by title overlap
     download_df = df
