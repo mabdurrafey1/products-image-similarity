@@ -153,7 +153,10 @@ class SearchTab(ttk.Frame):
             
         self.selected_excel_var = tk.StringVar(value=self.excel_options[0])
         self.source_dropdown = ttk.Combobox(form_card, textvariable=self.selected_excel_var, values=self.excel_options, state="readonly", width=40)
-        self.source_dropdown.grid(row=2, column=1, columnspan=2, padx=10, pady=10, sticky="w")
+        self.source_dropdown.grid(row=2, column=1, padx=10, pady=10, sticky="w")
+        
+        refresh_btn = ttk.Button(form_card, text="Refresh", command=self.refresh_excel_list)
+        refresh_btn.grid(row=2, column=2, padx=10, pady=10, sticky="w")
         
         # 4. Price Range Row
         price_label = ttk.Label(form_card, text="Price Range:")
@@ -285,6 +288,20 @@ class SearchTab(ttk.Frame):
         self.log_text.config(yscrollcommand=scrollbar.set)
         
         form_card.columnconfigure(1, weight=1)
+
+    def refresh_excel_list(self):
+        import glob
+        excel_files = sorted(glob.glob("input_data/*.xlsx"))
+        self.excel_options = [os.path.basename(f) for f in excel_files]
+        if not self.excel_options:
+            self.excel_options = ["(No Excel files found)"]
+        
+        self.source_dropdown["values"] = self.excel_options
+        
+        # Keep current selection if still valid, otherwise reset to default
+        current_val = self.selected_excel_var.get()
+        if current_val not in self.excel_options:
+            self.selected_excel_var.set(self.excel_options[0])
 
     def browse_image(self):
         file_paths = filedialog.askopenfilenames(
