@@ -201,9 +201,6 @@ def run_visual_search(image_dir, query_path, no_indexing=False):
         return {}
         
     abs_query_paths = [os.path.abspath(q) for q in query_list]
-    primary_query = abs_query_paths[0]
-    positive_queries = abs_query_paths[1:]
-    
     visual_scores = {}
     print(f"Querying AI model for visual similarity scores (in-process) using {len(abs_query_paths)} reference images...")
     try:
@@ -213,16 +210,20 @@ def run_visual_search(image_dir, query_path, no_indexing=False):
             no_indexing=no_indexing
         )
         try:
-            search_results = rclip_instance.search(
-                query=primary_query,
-                directory=os.path.abspath(image_dir),
-                top_k=2000,
-                positive_queries=positive_queries
-            )
-            for item in search_results:
-                filename = os.path.basename(item.filepath)
-                sku = os.path.splitext(filename)[0].strip().upper()
-                visual_scores[sku] = item.score
+            for q_path in abs_query_paths:
+                check_stop()
+                print(f"  Processing query image: {os.path.basename(q_path)}")
+                search_results = rclip_instance.search(
+                    query=q_path,
+                    directory=os.path.abspath(image_dir),
+                    top_k=2000
+                )
+                for item in search_results:
+                    filename = os.path.basename(item.filepath)
+                    sku = os.path.splitext(filename)[0].strip().upper()
+                    # Take the maximum similarity score across all query images
+                    if sku not in visual_scores or item.score > visual_scores[sku]:
+                        visual_scores[sku] = item.score
         finally:
             rclip_model.close()
             rclip_db.close()
