@@ -277,6 +277,15 @@ class SearchTab(ttk.Frame):
         self.view_btn = ttk.Button(btn_frame, text="View Results (HTML)", command=self.open_last_results)
         self.view_btn.pack(side="left", expand=True, fill="x", padx=5)
         
+        self.stop_btn = tk.Button(
+            btn_frame, text="Stop Execution", command=self.stop_matching,
+            bg="#ef4444", fg="white", activebackground="#dc2626", activeforeground="white",
+            font=("Segoe UI", 9, "bold"), bd=0, highlightthickness=0,
+            padx=10, pady=4
+        )
+        self.stop_btn.pack(side="left", expand=True, fill="x", padx=5)
+        self.stop_btn.config(state="disabled")
+        
 
         
         # Log Panel
@@ -380,6 +389,9 @@ class SearchTab(ttk.Frame):
         if self.is_running:
             return
             
+        # Reset stop flag on new run
+        match_image_ai.stop_requested = False
+            
         query_image = self.image_path_var.get().strip()
         query_title = self.title_text.get("1.0", tk.END).strip()
         
@@ -395,6 +407,7 @@ class SearchTab(ttk.Frame):
             
         self.is_running = True
         self.run_btn.config(state="disabled")
+        self.stop_btn.config(state="normal")
         self.progress.start(10)
         self.status_var.set("Initializing AI search model & calculating embeddings...")
         self.log_text.delete("1.0", tk.END)
@@ -487,9 +500,18 @@ class SearchTab(ttk.Frame):
             thread_safe_stderr.redirectors.pop(tid, None)
             self.is_running = False
 
+    def stop_matching(self):
+        if not self.is_running:
+            return
+        self.append_log("\n[Stop Request Received] Aborting search...\n")
+        self.status_var.set("Stopping execution...")
+        match_image_ai.stop_requested = True
+        self.stop_btn.config(state="disabled")
+
     def on_search_success(self):
         self.progress.stop()
         self.run_btn.config(state="normal")
+        self.stop_btn.config(state="disabled")
         self.status_var.set(f"Search complete! Matches saved to {self.last_report_path}")
         self.append_log("\n[SUCCESS] AI Duplicate Finder completed successfully.\n")
         
@@ -499,9 +521,15 @@ class SearchTab(ttk.Frame):
     def on_search_error(self, error_msg):
         self.progress.stop()
         self.run_btn.config(state="normal")
-        self.status_var.set("Error occurred during search matching.")
-        self.append_log(f"\n[ERROR] Process failed:\n{error_msg}\n")
-        messagebox.showerror("Error During Matching", f"An error occurred:\n\n{error_msg}")
+        self.stop_btn.config(state="disabled")
+        
+        if "StopRequested" in error_msg or "stopped by user" in error_msg:
+            self.status_var.set("Execution stopped by user.")
+            self.append_log("\n[STOPPED] Search execution was stopped by user.\n")
+        else:
+            self.status_var.set("Error occurred during search matching.")
+            self.append_log(f"\n[ERROR] Process failed:\n{error_msg}\n")
+            messagebox.showerror("Error During Matching", f"An error occurred:\n\n{error_msg}")
 
 class DuplicateFinderGUI:
     def __init__(self, root):

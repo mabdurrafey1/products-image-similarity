@@ -6,6 +6,12 @@ import re
 import pandas as pd
 from rclip.model import Model as RClipModel
 
+stop_requested = False
+
+def check_stop():
+    if stop_requested:
+        raise RuntimeError("StopRequested")
+
 def clean_title(title):
     """Clean and normalize product titles for keyword overlap comparison."""
     if not title or not isinstance(title, str):
@@ -245,6 +251,7 @@ def run_semantic_text_search(df, reference_title, visual_scores, min_text_sim, s
     # Step 1: Pre-filter by quick keyword overlap and check if visual score is available to reduce candidates
     candidates = []
     for idx, row in df.iterrows():
+        check_stop()
         sku = str(row.get('SKU', '')).strip().upper()
         if sku not in visual_scores:
             continue
@@ -265,6 +272,7 @@ def run_semantic_text_search(df, reference_title, visual_scores, min_text_sim, s
     threshold = min_text_sim if min_text_sim > 0.0 else 0.70
     batch_size = 128
     for i in range(0, len(candidates), batch_size):
+        check_stop()
         batch_candidates = candidates[i:i+batch_size]
         batch_titles = [item[2] for item in batch_candidates]
         
@@ -452,6 +460,7 @@ def main():
     # 2. Resolve query reference title for similarity checks
     reference_title = resolve_reference_title(df, args.query, args.query_title)
 
+    check_stop()
 
     # 4. Filter downloader queue by title overlap
     download_df = df
@@ -459,6 +468,7 @@ def main():
         print("Pre-filtering database to download images only for keyword-overlapping products...")
         matching_indices = []
         for idx, row in df.iterrows():
+            check_stop()
             title = str(row.get('Title', ''))
             if title and get_title_similarity(reference_title, title) > 0.0:
                 matching_indices.append(idx)
@@ -468,20 +478,30 @@ def main():
         else:
             print("Warning: No products found with keyword overlap. Downloading all missing images as fallback.")
 
+    check_stop()
+
     # 5. Automatically download missing images
     download_missing_images(download_df, image_dir=args.image_dir, max_workers=args.workers)
 
+    check_stop()
+
     # 6. Run visual similarity search (in-process rclip)
     visual_scores = run_visual_search(args.image_dir, args.query, no_indexing=args.no_indexing)
+
+    check_stop()
 
     # 7. Fallback to Rank 1 match if reference title wasn't found earlier
     if not reference_title and visual_scores:
         reference_title = resolve_reference_title(df, args.query, args.query_title, visual_scores)
 
+    check_stop()
+
     # 8. Run semantic text search
     text_matches = []
     if reference_title:
         text_matches = run_semantic_text_search(df, reference_title, visual_scores, args.min_text_sim, args.strict)
+
+    check_stop()
 
     # 9. Format, sort, save and print results
     max_score = max(visual_scores.values()) if visual_scores else 0.0

@@ -55,6 +55,12 @@ def download_missing_images(df, image_dir="downloaded_images", max_workers=10):
             nonlocal completed
             sku, url, dest = task
             try:
+                try:
+                    import match_image_ai
+                    if getattr(match_image_ai, "stop_requested", False):
+                        return
+                except Exception:
+                    pass
                 r = session.get(url, headers=headers, timeout=15)
                 if r.status_code == 200:
                     # Check if the response is actually an image and not an HTML error page
