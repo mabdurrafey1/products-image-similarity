@@ -62,8 +62,20 @@ def download_missing_images(df, image_dir="downloaded_images", max_workers=10):
                     if 'html' in content_type:
                         print(f"Failed downloading SKU {sku}: CDN returned HTML instead of image")
                         return
-                    with open(dest, 'wb') as f:
-                        f.write(r.content)
+                    
+                    # Try to load, resize, and compress the image
+                    try:
+                        from PIL import Image
+                        import io
+                        img = Image.open(io.BytesIO(r.content))
+                        if img.mode in ("RGBA", "P"):
+                            img = img.convert("RGB")
+                        img.thumbnail((300, 300))
+                        img.save(dest, "JPEG", quality=80)
+                    except Exception:
+                        # Fallback to saving raw bytes if image processing fails
+                        with open(dest, 'wb') as f:
+                            f.write(r.content)
                 else:
                     print(f"Failed downloading SKU {sku}: status code {r.status_code}")
             except Exception as e:
