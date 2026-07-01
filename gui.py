@@ -561,11 +561,12 @@ class DuplicateFinderGUI:
         
         style = ttk.Style()
         style.configure("AddTab.TButton", font=("Segoe UI", 9, "bold"))
+        style.configure("CloseTab.TButton", foreground="#ef4444", font=("Segoe UI", 9, "bold"))
         
         self.add_tab_btn = ttk.Button(top_bar, text="+ Add New Search Tab", command=self.add_search_tab, style="AddTab.TButton")
         self.add_tab_btn.pack(side="left", padx=5, pady=5)
         
-        self.close_tab_btn = ttk.Button(top_bar, text="✕ Close Current Tab", command=self.close_current_tab)
+        self.close_tab_btn = ttk.Button(top_bar, text="✕ Close Current Tab", command=self.close_current_tab, style="CloseTab.TButton")
         self.close_tab_btn.pack(side="left", padx=5, pady=5)
         
         # Notebook Layout
