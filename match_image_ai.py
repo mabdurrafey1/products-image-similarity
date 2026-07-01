@@ -212,7 +212,7 @@ def run_visual_search(image_dir, query_path, no_indexing=False):
         try:
             for q_path in abs_query_paths:
                 check_stop()
-                print(f"  Processing query image: {os.path.basename(q_path)}")
+                print(f"Processing query image: {os.path.basename(q_path)}")
                 search_results = rclip_instance.search(
                     query=q_path,
                     directory=os.path.abspath(image_dir),
