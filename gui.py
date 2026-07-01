@@ -405,6 +405,7 @@ class SearchTab(ttk.Frame):
                 return
             
         self.is_running = True
+        self.main_app.notebook.tab(self, text=f"Search Tab #{self.tab_id}")
         self.run_btn.config(state="disabled")
         self.stop_btn.config(state="normal")
         self.progress.start(10)
@@ -513,6 +514,7 @@ class SearchTab(ttk.Frame):
         self.stop_btn.config(state="disabled")
         self.status_var.set(f"Search complete! Matches saved to {self.last_report_path}")
         self.append_log("\n[SUCCESS] AI Duplicate Finder completed successfully.\n")
+        self.main_app.notebook.tab(self, text=f"Search Tab #{self.tab_id} ✅")
         
         if messagebox.askyesno("Search Complete", f"AI search matching finished successfully for Tab #{self.tab_id}!\n\nWould you like to open the HTML results dashboard in your browser?"):
             self.open_last_results()
