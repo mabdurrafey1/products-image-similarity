@@ -12,6 +12,11 @@ import threading
 stop_requested = False
 _stop_event_local = threading.local()
 
+# Lock to serialize rclip SQLite database access across parallel tabs.
+# rclip's ensure_index() marks images as deleted/indexing which corrupts
+# concurrent readers. Everything else (downloads, text filtering) is parallel.
+_rclip_lock = threading.Lock()
+
 def check_stop():
     """Raise StopRequested if the current tab's stop event is set, or the global flag is True."""
     local_event = getattr(_stop_event_local, 'event', None)
@@ -213,29 +218,30 @@ def run_visual_search(image_dir, query_path, no_indexing=False):
     visual_scores = {}
     print(f"Querying AI model for visual similarity scores (in-process) using {len(abs_query_paths)} reference images...")
     try:
-        rclip_instance, rclip_model, rclip_db = init_rclip(
-            working_directory=os.path.abspath(image_dir),
-            indexing_batch_size=32,
-            no_indexing=no_indexing
-        )
-        try:
-            for q_path in abs_query_paths:
-                check_stop()
-                print(f"Processing query image: {os.path.basename(q_path)}")
-                search_results = rclip_instance.search(
-                    query=q_path,
-                    directory=os.path.abspath(image_dir),
-                    top_k=2000
-                )
-                for item in search_results:
-                    filename = os.path.basename(item.filepath)
-                    sku = os.path.splitext(filename)[0].strip().upper()
-                    # Take the maximum similarity score across all query images
-                    if sku not in visual_scores or item.score > visual_scores[sku]:
-                        visual_scores[sku] = item.score
-        finally:
-            rclip_model.close()
-            rclip_db.close()
+        with _rclip_lock:
+            rclip_instance, rclip_model, rclip_db = init_rclip(
+                working_directory=os.path.abspath(image_dir),
+                indexing_batch_size=32,
+                no_indexing=no_indexing
+            )
+            try:
+                for q_path in abs_query_paths:
+                    check_stop()
+                    print(f"Processing query image: {os.path.basename(q_path)}")
+                    search_results = rclip_instance.search(
+                        query=q_path,
+                        directory=os.path.abspath(image_dir),
+                        top_k=2000
+                    )
+                    for item in search_results:
+                        filename = os.path.basename(item.filepath)
+                        sku = os.path.splitext(filename)[0].strip().upper()
+                        # Take the maximum similarity score across all query images
+                        if sku not in visual_scores or item.score > visual_scores[sku]:
+                            visual_scores[sku] = item.score
+            finally:
+                rclip_model.close()
+                rclip_db.close()
         print(f"Successfully loaded {len(visual_scores)} visual similarity scores.")
     except Exception as e:
         print(f"Warning: Could not run rclip visual search: {e}")
