@@ -399,6 +399,44 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
         json.dump(results_data, f, indent=4, ensure_ascii=False)
     print(f"Saved AI search results to {output_path}")
 
+def setup_global_image_dir(image_dir):
+    """
+    If image_dir is the default 'downloaded_images', resolve it to a global user-level 
+    directory so indexing/downloads are shared globally across different app runs/releases.
+    Creates a local symlink in the working directory pointing to it for relative HTML references.
+    """
+    if image_dir != "downloaded_images":
+        # If user explicitly specifies a custom image dir, honor it exactly
+        return os.path.abspath(image_dir)
+
+    import platform
+    home = os.path.expanduser("~")
+    sys_name = platform.system()
+    if sys_name == "Darwin":
+        global_path = os.path.join(home, "Library", "Application Support", "DuplicateFinder", "downloaded_images")
+    elif sys_name == "Windows":
+        global_path = os.path.join(home, "AppData", "Roaming", "DuplicateFinder", "downloaded_images")
+    else:
+        global_path = os.path.join(home, ".local", "share", "DuplicateFinder", "downloaded_images")
+
+    global_path = os.path.abspath(global_path)
+    os.makedirs(global_path, exist_ok=True)
+
+    local_path = os.path.abspath("downloaded_images")
+    if not os.path.exists(local_path):
+        try:
+            if sys_name == "Windows":
+                import subprocess
+                subprocess.run(f'mklink /J "{local_path}" "{global_path}"', shell=True, check=True)
+            else:
+                os.symlink(global_path, local_path)
+            print(f"Created local symlink 'downloaded_images' -> '{global_path}'")
+        except Exception as e:
+            print(f"Warning: Could not create local link to global images folder: {e}. Indexing locally instead.")
+            return local_path
+
+    return global_path
+
 def main(args=None, stop_event=None):
     """
     Run the AI duplicate search.
@@ -460,8 +498,7 @@ def main(args=None, stop_event=None):
                 print(f"Error: Input dataset path '{input_path}' not found.")
                 return
 
-        if not os.path.exists(args.image_dir):
-            os.makedirs(args.image_dir, exist_ok=True)
+        args.image_dir = setup_global_image_dir(args.image_dir)
 
         # 1. Load spreadsheet database
         try:
