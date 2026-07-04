@@ -8,6 +8,51 @@ import match_image_ai
 import generate_report
 from PIL import Image, ImageTk
 import re
+import json
+
+def get_config_path():
+    home = os.path.expanduser("~")
+    import platform
+    sys_name = platform.system()
+    if sys_name == "Darwin":
+        dir_path = os.path.join(home, "Library", "Application Support", "DuplicateFinder")
+    elif sys_name == "Windows":
+        dir_path = os.path.join(home, "AppData", "Roaming", "DuplicateFinder")
+    else:
+        dir_path = os.path.join(home, ".local", "share", "DuplicateFinder")
+    os.makedirs(dir_path, exist_ok=True)
+    return os.path.join(dir_path, "config.json")
+
+def load_config():
+    config_path = get_config_path()
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def save_config(config_data):
+    config_path = get_config_path()
+    try:
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(config_data, f, indent=4)
+    except Exception:
+        pass
+
+def get_default_global_image_dir():
+    import platform
+    home = os.path.expanduser("~")
+    sys_name = platform.system()
+    if sys_name == "Darwin":
+        path = os.path.join(home, "Library", "Application Support", "DuplicateFinder", "downloaded_images")
+    elif sys_name == "Windows":
+        path = os.path.join(home, "AppData", "Roaming", "DuplicateFinder", "downloaded_images")
+    else:
+        path = os.path.join(home, ".local", "share", "DuplicateFinder", "downloaded_images")
+    return os.path.abspath(path)
+
 
 class CustomStdout:
     def __init__(self, root, log_text, status_var, progress_bar):
@@ -165,12 +210,26 @@ class SearchTab(ttk.Frame):
         refresh_btn = ttk.Button(form_card, text="Refresh", command=self.refresh_excel_list)
         refresh_btn.grid(row=2, column=2, padx=10, pady=10, sticky="w")
         
+        # 3. Global Images Directory Row
+        config = load_config()
+        default_image_dir = config.get("image_dir", get_default_global_image_dir())
+        self.image_dir_var = tk.StringVar(value=default_image_dir)
+
+        img_dir_label = ttk.Label(form_card, text="Images Directory:")
+        img_dir_label.grid(row=3, column=0, sticky="w", padx=10, pady=10)
+
+        img_dir_entry = ttk.Entry(form_card, textvariable=self.image_dir_var, width=40)
+        img_dir_entry.grid(row=3, column=1, padx=10, pady=10, sticky="we")
+
+        img_dir_btn = ttk.Button(form_card, text="Browse...", command=self.browse_image_dir)
+        img_dir_btn.grid(row=3, column=2, padx=10, pady=10, sticky="w")
+
         # 4. Price Range Row
         price_label = ttk.Label(form_card, text="Price Range:")
-        price_label.grid(row=3, column=0, sticky="w", padx=10, pady=10)
+        price_label.grid(row=4, column=0, sticky="w", padx=10, pady=10)
         
         price_frame = ttk.Frame(form_card)
-        price_frame.grid(row=3, column=1, columnspan=2, sticky="w", padx=10, pady=10)
+        price_frame.grid(row=4, column=1, columnspan=2, sticky="w", padx=10, pady=10)
         
         min_lbl = ttk.Label(price_frame, text="Min:")
         min_lbl.pack(side="left", padx=2)
@@ -191,7 +250,7 @@ class SearchTab(ttk.Frame):
         
         # 5. Settings Row
         settings_frame = ttk.Frame(form_card)
-        settings_frame.grid(row=4, column=0, columnspan=3, pady=10, sticky="w", padx=10)
+        settings_frame.grid(row=5, column=0, columnspan=3, pady=10, sticky="w", padx=10)
         
         self.strict_var = tk.BooleanVar(value=False)
         strict_cb = ttk.Checkbutton(settings_frame, text="Strict Model Matching", variable=self.strict_var)
@@ -217,10 +276,10 @@ class SearchTab(ttk.Frame):
 
         # 6. Thresholds Row
         sim_label = ttk.Label(form_card, text="Match Thresholds:")
-        sim_label.grid(row=5, column=0, sticky="w", padx=10, pady=10)
+        sim_label.grid(row=6, column=0, sticky="w", padx=10, pady=10)
 
         sim_frame = ttk.Frame(form_card)
-        sim_frame.grid(row=5, column=1, columnspan=2, sticky="we", padx=10, pady=10)
+        sim_frame.grid(row=6, column=1, columnspan=2, sticky="we", padx=10, pady=10)
 
         # Text Match Threshold
         text_frame = ttk.Frame(sim_frame)
@@ -313,6 +372,19 @@ class SearchTab(ttk.Frame):
         current_val = self.selected_excel_var.get()
         if current_val not in self.excel_options:
             self.selected_excel_var.set(self.excel_options[0])
+
+    def browse_image_dir(self):
+        initial_dir = self.image_dir_var.get()
+        if not os.path.exists(initial_dir):
+            initial_dir = os.path.expanduser("~")
+        selected = filedialog.askdirectory(initialdir=initial_dir, title="Select Global Images Folder")
+        if selected:
+            selected = os.path.abspath(selected)
+            self.image_dir_var.set(selected)
+            # Save configuration
+            config = load_config()
+            config["image_dir"] = selected
+            save_config(config)
 
     def browse_image(self):
         file_paths = filedialog.askopenfilenames(
@@ -449,7 +521,7 @@ class SearchTab(ttk.Frame):
                 max_price=float(max_p) if max_p else None,
                 strict=bool(self.strict_var.get()),
                 no_indexing=bool(self.no_indexing_var.get()),
-                image_dir="downloaded_images",
+                image_dir=self.image_dir_var.get().strip(),
             )
 
             self.main_app.root.after(0, self.status_var.set, "Running AI visual search...")

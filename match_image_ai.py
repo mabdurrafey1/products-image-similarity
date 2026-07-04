@@ -401,41 +401,52 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
 
 def setup_global_image_dir(image_dir):
     """
-    If image_dir is the default 'downloaded_images', resolve it to a global user-level 
-    directory so indexing/downloads are shared globally across different app runs/releases.
-    Creates a local symlink in the working directory pointing to it for relative HTML references.
+    Resolve image_dir (custom or default 'downloaded_images') and ensure a local 
+    symlink 'downloaded_images' is created pointing to it for relative HTML references.
     """
-    if image_dir != "downloaded_images":
-        # If user explicitly specifies a custom image dir, honor it exactly
-        return os.path.abspath(image_dir)
-
     import platform
-    home = os.path.expanduser("~")
     sys_name = platform.system()
-    if sys_name == "Darwin":
-        global_path = os.path.join(home, "Library", "Application Support", "DuplicateFinder", "downloaded_images")
-    elif sys_name == "Windows":
-        global_path = os.path.join(home, "AppData", "Roaming", "DuplicateFinder", "downloaded_images")
+    
+    if image_dir == "downloaded_images":
+        home = os.path.expanduser("~")
+        if sys_name == "Darwin":
+            target_path = os.path.join(home, "Library", "Application Support", "DuplicateFinder", "downloaded_images")
+        elif sys_name == "Windows":
+            target_path = os.path.join(home, "AppData", "Roaming", "DuplicateFinder", "downloaded_images")
+        else:
+            target_path = os.path.join(home, ".local", "share", "DuplicateFinder", "downloaded_images")
     else:
-        global_path = os.path.join(home, ".local", "share", "DuplicateFinder", "downloaded_images")
+        target_path = image_dir
 
-    global_path = os.path.abspath(global_path)
-    os.makedirs(global_path, exist_ok=True)
+    target_path = os.path.abspath(target_path)
+    os.makedirs(target_path, exist_ok=True)
 
     local_path = os.path.abspath("downloaded_images")
-    if not os.path.exists(local_path):
+    # If a symlink or file exists but points to a different location, recreate it
+    # to match the newly selected user directory
+    is_link = os.path.islink(local_path) or (sys_name == "Windows" and os.path.exists(local_path) and os.path.isdir(local_path) and not os.listdir(local_path))
+    
+    if os.path.exists(local_path) or os.path.islink(local_path):
+        # If it's a symlink/junction, check if it points to target_path; if not, recreate it
+        try:
+            current_target = os.path.readlink(local_path) if os.path.islink(local_path) else ""
+            if current_target and os.path.abspath(current_target) != target_path:
+                os.remove(local_path)
+        except Exception:
+            pass
+
+    if not os.path.exists(local_path) and not os.path.islink(local_path):
         try:
             if sys_name == "Windows":
                 import subprocess
-                subprocess.run(f'mklink /J "{local_path}" "{global_path}"', shell=True, check=True)
+                subprocess.run(f'mklink /J "{local_path}" "{target_path}"', shell=True, check=True)
             else:
-                os.symlink(global_path, local_path)
-            print(f"Created local symlink 'downloaded_images' -> '{global_path}'")
+                os.symlink(target_path, local_path)
+            print(f"Created local symlink 'downloaded_images' -> '{target_path}'")
         except Exception as e:
-            print(f"Warning: Could not create local link to global images folder: {e}. Indexing locally instead.")
-            return local_path
+            print(f"Warning: Could not create local link to images folder: {e}. Indexing target path directly.")
 
-    return global_path
+    return target_path
 
 def main(args=None, stop_event=None):
     """
