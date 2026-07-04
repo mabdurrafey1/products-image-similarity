@@ -4,7 +4,6 @@ import argparse
 import json
 import re
 import pandas as pd
-from rclip.model import Model as RClipModel
 
 import threading
 
@@ -249,6 +248,7 @@ def run_semantic_text_search(df, reference_title, visual_scores, min_text_sim, s
     # Initialize CLIP model for semantic text similarity comparison
     print("Initializing CLIP text encoder for semantic text similarity...")
     try:
+        from rclip.model import Model as RClipModel
         clip_model = RClipModel()
         clip_model.ensure_downloaded()
         ref_emb = clip_model.compute_text_features([reference_title])[0]
