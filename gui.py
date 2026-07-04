@@ -614,6 +614,7 @@ class SearchTab(ttk.Frame):
 class DuplicateFinderGUI:
     def __init__(self, root):
         self.root = root
+        match_image_ai.setup_global_input_data_dir()
         self.root.title("AI Product Duplicate Finder")
         
         screen_height = self.root.winfo_screenheight()

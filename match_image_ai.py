@@ -399,6 +399,71 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
         json.dump(results_data, f, indent=4, ensure_ascii=False)
     print(f"Saved AI search results to {output_path}")
 
+def setup_global_input_data_dir():
+    """
+    Ensure the global input_data folder exists in the persistent user directory,
+    and create a local symbolic link/junction in the current workspace so the
+    relative 'input_data' paths resolve to the global folder transparently.
+    """
+    import platform
+    sys_name = platform.system()
+    
+    home = os.path.expanduser("~")
+    if sys_name == "Darwin":
+        target_path = os.path.join(home, "Library", "Application Support", "DuplicateFinder", "input_data")
+    elif sys_name == "Windows":
+        target_path = os.path.join(home, "AppData", "Roaming", "DuplicateFinder", "input_data")
+    else:
+        target_path = os.path.join(home, ".local", "share", "DuplicateFinder", "input_data")
+
+    target_path = os.path.abspath(target_path)
+    os.makedirs(target_path, exist_ok=True)
+
+    local_path = os.path.abspath("input_data")
+    
+    # If local_path exists but is a real directory (not a symlink/junction), migrate its contents
+    if os.path.exists(local_path) and not os.path.islink(local_path):
+        # On Windows, junctions can also report isdir=True, but they are links
+        # Check if it's not a junction by trying to readlink or check attribute
+        is_real_dir = True
+        if sys_name == "Windows":
+            try:
+                # If it can readlink or is a junction, it's not a real directory
+                os.readlink(local_path)
+                is_real_dir = False
+            except Exception:
+                pass
+        
+        if is_real_dir:
+            import shutil
+            try:
+                for item in os.listdir(local_path):
+                    s = os.path.join(local_path, item)
+                    d = os.path.join(target_path, item)
+                    if os.path.isdir(s):
+                        if not os.path.exists(d):
+                            shutil.copytree(s, d)
+                    else:
+                        if not os.path.exists(d):
+                            shutil.copy(s, d)
+                shutil.rmtree(local_path)
+            except Exception as e:
+                print(f"Warning: Could not migrate local input_data to global: {e}")
+
+    # Recreate the symlink/junction if it doesn't exist
+    if not os.path.exists(local_path) and not os.path.islink(local_path):
+        try:
+            if sys_name == "Windows":
+                import subprocess
+                subprocess.run(f'mklink /J "{local_path}" "{target_path}"', shell=True, check=True)
+            else:
+                os.symlink(target_path, local_path)
+            print(f"Created local symlink 'input_data' -> '{target_path}'")
+        except Exception as e:
+            print(f"Warning: Could not create local link to input_data folder: {e}.")
+
+    return target_path
+
 def setup_global_image_dir(image_dir):
     """
     Resolve image_dir (custom or default 'downloaded_images') and ensure a local 
@@ -470,6 +535,7 @@ def main(args=None, stop_event=None):
     """
     # Install per-thread stop event so check_stop() picks it up without globals
     _stop_event_local.event = stop_event
+    setup_global_input_data_dir()
 
     try:
         if args is None:
