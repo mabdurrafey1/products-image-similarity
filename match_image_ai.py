@@ -429,9 +429,15 @@ def setup_global_image_dir(image_dir):
     if os.path.exists(local_path) or os.path.islink(local_path):
         # If it's a symlink/junction, check if it points to target_path; if not, recreate it
         try:
-            current_target = os.path.readlink(local_path) if os.path.islink(local_path) else ""
+            current_target = os.readlink(local_path) if os.path.islink(local_path) else ""
             if current_target and os.path.abspath(current_target) != target_path:
-                os.remove(local_path)
+                if os.path.islink(local_path):
+                    os.remove(local_path)
+                else:
+                    try:
+                        os.rmdir(local_path)
+                    except Exception:
+                        os.remove(local_path)
         except Exception:
             pass
 
