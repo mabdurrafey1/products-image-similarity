@@ -401,7 +401,7 @@ class SearchTab(ttk.Frame):
                 return
             
         self.is_running = True
-        self.main_app.notebook.tab(self, text=f"Search Tab #{self.tab_id}")
+        self.main_app.notebook.tab(self, text=f"Search Tab #{self.tab_id} ⏳")
         self.run_btn.config(state="disabled")
         self.stop_btn.config(state="normal")
         self.progress.start(10)
@@ -518,9 +518,11 @@ class SearchTab(ttk.Frame):
         if "StopRequested" in error_msg or "stopped by user" in error_msg:
             self.status_var.set("Execution stopped by user.")
             self.append_log("\n[STOPPED] Search execution was stopped by user.\n")
+            self.main_app.notebook.tab(self, text=f"Search Tab #{self.tab_id}")
         else:
             self.status_var.set("Error occurred during search matching.")
             self.append_log(f"\n[ERROR] Process failed:\n{error_msg}\n")
+            self.main_app.notebook.tab(self, text=f"Search Tab #{self.tab_id}")
             messagebox.showerror("Error During Matching", f"An error occurred:\n\n{error_msg}")
 
     def close_tab(self):
