@@ -12,10 +12,10 @@ import threading
 stop_requested = False
 _stop_event_local = threading.local()
 
-# Lock used ONLY for the one-time rclip indexing step.
-# After indexing completes, all tabs search in parallel with no lock.
+# Lock used ONLY for re-indexing when new images appear.
+# Search is always fully parallel with independent DB connections.
 _rclip_lock = threading.Lock()
-_rclip_indexed_dirs = set()
+_rclip_file_count = {}  # abs_image_dir → file count at time of last index
 
 def check_stop():
     """Raise StopRequested if the current tab's stop event is set, or the global flag is True."""
@@ -207,10 +207,10 @@ def resolve_reference_title(df, query_path, query_title, visual_scores=None):
 def run_visual_search(image_dir, query_path, no_indexing=False):
     """Run rclip visual search in-process to get visual similarity scores.
     
-    Uses an index-once-search-parallel strategy:
-    - The first tab to reach here runs ensure_index() (serialized via lock).
-    - All tabs then open independent read-only DB connections and search
-      concurrently with no lock.
+    Uses a stale-check index, search-parallel strategy:
+    - Checks if directory file count has changed since last index.
+    - If changed, index is updated incrementally (serialized via lock).
+    - If not changed, skips indexing and runs search in parallel with no lock.
     """
     from rclip.main import init_rclip
     
@@ -225,12 +225,29 @@ def run_visual_search(image_dir, query_path, no_indexing=False):
     visual_scores = {}
     print(f"Querying AI model for visual similarity scores (in-process) using {len(abs_query_paths)} reference images...")
     try:
-        # Step 1: Ensure the image directory is indexed exactly once (serialized).
-        # Uses double-checked locking so only the very first caller blocks.
-        if not no_indexing and abs_image_dir not in _rclip_indexed_dirs:
+        # Step 1: Check if new files have been added since the last indexing run.
+        current_count = 0
+        if os.path.exists(abs_image_dir):
+            try:
+                current_count = len(os.listdir(abs_image_dir))
+            except Exception:
+                pass
+                
+        last_indexed_count = _rclip_file_count.get(abs_image_dir, -1)
+        
+        if not no_indexing and current_count != last_indexed_count:
             with _rclip_lock:
-                if abs_image_dir not in _rclip_indexed_dirs:
-                    print(f"[Index] Running one-time image index for directory...")
+                # Double-check inside lock
+                current_count = 0
+                if os.path.exists(abs_image_dir):
+                    try:
+                        current_count = len(os.listdir(abs_image_dir))
+                    except Exception:
+                        pass
+                last_indexed_count = _rclip_file_count.get(abs_image_dir, -1)
+                
+                if current_count != last_indexed_count:
+                    print(f"[Index] Images count changed ({last_indexed_count} -> {current_count}). Running incremental index...")
                     idx_rclip, idx_model, idx_db = init_rclip(
                         working_directory=abs_image_dir,
                         indexing_batch_size=32,
@@ -238,7 +255,7 @@ def run_visual_search(image_dir, query_path, no_indexing=False):
                     )
                     idx_model.close()
                     idx_db.close()
-                    _rclip_indexed_dirs.add(abs_image_dir)
+                    _rclip_file_count[abs_image_dir] = current_count
                     print(f"[Index] Indexing complete.")
 
         # Step 2: Search in parallel — each tab opens its own DB connection
