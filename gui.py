@@ -103,6 +103,9 @@ thread_safe_stderr = ThreadSafeStdoutRedirector(sys.stderr)
 sys.stdout = thread_safe_stdout
 sys.stderr = thread_safe_stderr
 
+# Global lock to prevent concurrent tabs from overwriting sys.argv simultaneously
+_match_lock = threading.Lock()
+
 class SearchTab(ttk.Frame):
     def __init__(self, parent, tab_id, main_app):
         super().__init__(parent)
@@ -430,62 +433,65 @@ class SearchTab(ttk.Frame):
             selected_excel_name = self.selected_excel_var.get().strip()
             excel_path = os.path.join("input_data", selected_excel_name)
             
-            old_argv = sys.argv
-            sys.argv = [
-                "match_image_ai.py",
-                "--query", image_path,
-                "--query-title", query_title,
-                "--input", excel_path,
-                "--output", f"temp/search_results_ai_{self.tab_id}.json",
-                "--workers", self.workers_var.get(),
-                "--top", self.top_var.get(),
-                "--min-text-sim", f"{self.text_sim_var.get() / 100.0:.2f}",
-                "--min-score", f"{self.img_sim_var.get():.2f}"
-            ]
-            
-            min_p = self.min_price_var.get().strip()
-            max_p = self.max_price_var.get().strip()
-            if min_p:
-                sys.argv.extend(["--min-price", min_p])
-            if max_p:
-                sys.argv.extend(["--max-price", max_p])
-            if self.strict_var.get():
-                sys.argv.append("--strict")
-            if self.no_indexing_var.get():
-                sys.argv.append("--no-indexing")
+            # Acquire lock so concurrent tabs don't overwrite each other's sys.argv
+            self.main_app.root.after(0, self.status_var.set, "Waiting for other tab to finish indexing...")
+            with _match_lock:
+                old_argv = sys.argv
+                sys.argv = [
+                    "match_image_ai.py",
+                    "--query", image_path,
+                    "--query-title", query_title,
+                    "--input", excel_path,
+                    "--output", f"temp/search_results_ai_{self.tab_id}.json",
+                    "--workers", self.workers_var.get(),
+                    "--top", self.top_var.get(),
+                    "--min-text-sim", f"{self.text_sim_var.get() / 100.0:.2f}",
+                    "--min-score", f"{self.img_sim_var.get():.2f}"
+                ]
 
-            self.main_app.root.after(0, self.status_var.set, "Running AI visual search...")
-            
-            try:
-                # Execute match_image_ai main method
-                match_image_ai.main()
-                
-                import datetime
-                # Slugify query_title for report filename
-                slug = re.sub(r'[^a-zA-Z0-9_-]', '_', query_title).strip('_')
-                if not slug:
-                    slug = "search_results"
-                slug = slug[:50]
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                report_filename = f"{slug}_{timestamp}.html"
-                report_path = os.path.join("reports", report_filename)
-                os.makedirs("reports", exist_ok=True)
-                self.last_report_path = report_path
+                min_p = self.min_price_var.get().strip()
+                max_p = self.max_price_var.get().strip()
+                if min_p:
+                    sys.argv.extend(["--min-price", min_p])
+                if max_p:
+                    sys.argv.extend(["--max-price", max_p])
+                if self.strict_var.get():
+                    sys.argv.append("--strict")
+                if self.no_indexing_var.get():
+                    sys.argv.append("--no-indexing")
 
-                # Execute generate_report html generator
-                self.main_app.root.after(0, self.status_var.set, "Compiling search matches into HTML dashboard...")
-                self.main_app.root.after(0, self.append_log, f"Generating {report_path} report...\n")
+                self.main_app.root.after(0, self.status_var.set, "Running AI visual search...")
+
+                try:
+                    # Execute match_image_ai main method (serialized via _match_lock)
+                    match_image_ai.main()
                 
-                query_images_list = [p.strip() for p in image_path.split(";") if p.strip()]
-                generate_report.generate_html_report(
-                    json_path=f"temp/search_results_ai_{self.tab_id}.json",
-                    output_html=report_path,
-                    excel_path=excel_path,
-                    query_title=query_title,
-                    query_images=query_images_list
-                )
-            finally:
-                sys.argv = old_argv
+                    import datetime
+                    # Slugify query_title for report filename
+                    slug = re.sub(r'[^a-zA-Z0-9_-]', '_', query_title).strip('_')
+                    if not slug:
+                        slug = "search_results"
+                    slug = slug[:50]
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    report_filename = f"{slug}_{timestamp}.html"
+                    report_path = os.path.join("reports", report_filename)
+                    os.makedirs("reports", exist_ok=True)
+                    self.last_report_path = report_path
+
+                    # Execute generate_report html generator
+                    self.main_app.root.after(0, self.status_var.set, "Compiling search matches into HTML dashboard...")
+                    self.main_app.root.after(0, self.append_log, f"Generating {report_path} report...\n")
+                
+                    query_images_list = [p.strip() for p in image_path.split(";") if p.strip()]
+                    generate_report.generate_html_report(
+                        json_path=f"temp/search_results_ai_{self.tab_id}.json",
+                        output_html=report_path,
+                        excel_path=excel_path,
+                        query_title=query_title,
+                        query_images=query_images_list
+                    )
+                finally:
+                    sys.argv = old_argv
 
             self.main_app.root.after(0, self.on_search_success)
             
