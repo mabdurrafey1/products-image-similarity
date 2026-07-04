@@ -1076,6 +1076,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
 """
 
     # Format the header values
+    html_content = html_content.replace("{os.path.basename(excel_path)}", os.path.basename(excel_path))
     html_content = html_content.replace("{total_matches}", str(len(results)))
     html_content = html_content.replace("{best_visual}", f"{best_visual:.3f}" if best_visual else "N/A")
     html_content = html_content.replace("{best_text}", f"{best_text:.3f}" if best_text else "N/A")
