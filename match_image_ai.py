@@ -6,10 +6,20 @@ import re
 import pandas as pd
 from rclip.model import Model as RClipModel
 
+import threading
+
+# Legacy global flag kept for backward compatibility with CLI usage.
+# GUI tabs pass a per-tab threading.Event instead.
 stop_requested = False
+_stop_event_local = threading.local()
 
 def check_stop():
-    if stop_requested:
+    """Raise StopRequested if the current tab's stop event is set, or the global flag is True."""
+    local_event = getattr(_stop_event_local, 'event', None)
+    if local_event is not None:
+        if local_event.is_set():
+            raise RuntimeError("StopRequested")
+    elif stop_requested:
         raise RuntimeError("StopRequested")
 
 def clean_title(title):
@@ -389,126 +399,147 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
         json.dump(results_data, f, indent=4, ensure_ascii=False)
     print(f"Saved AI search results to {output_path}")
 
-def main():
-    parser = argparse.ArgumentParser(description="AI-powered duplicate listing search using rclip (CLIP).")
-    parser.add_argument("--query", default="/Users/mabdurrafey/Downloads/61ec5bb0-fe2c-4245-89fd-2f3e341e1e46.avif;/Users/mabdurrafey/Downloads/04429c3c-f63c-47a5-b709-06892999e7da.avif", help="Path to local query image (default: /Users/mabdurrafey/Downloads/61ec5bb0-fe2c-4245-89fd-2f3e341e1e46.avif;/Users/mabdurrafey/Downloads/04429c3c-f63c-47a5-b709-06892999e7da.avif)")
-    import glob
-    excel_files = sorted(glob.glob("input_data/*.xlsx"))
-    default_input = excel_files[0] if excel_files else "input_data"
-    
-    parser.add_argument("--input", default=default_input, help=f"Dataset Excel path or directory containing Excel files (default: {default_input})")
-    parser.add_argument("--output", default="temp/search_results_ai.json", help="Path to save search results JSON")
-    parser.add_argument("--top", type=int, default=500, help="Number of top visual matches to retrieve (default: 500)")
-    parser.add_argument("--min-score", type=float, default=0.20, help="Minimum AI similarity score threshold (default: 0.20)")
-    parser.add_argument("--min-text-sim", type=float, default=0.70, help="Minimum semantic text similarity score (default: 0.70, set to 0.0 to disable)")
-    parser.add_argument("--strict", action="store_true", help="Enforce strict alphanumeric model code matching")
-    parser.add_argument("--query-title", default="", help="Pasted title text to use as reference baseline for semantic text similarity")
-    parser.add_argument("--image-dir", default="downloaded_images", help="Directory where database images are stored")
-    parser.add_argument("--workers", type=int, default=10, help="Number of download workers")
-    parser.add_argument("--no-indexing", action="store_true", help="Skip checking/indexing images in the target directory")
-    parser.add_argument("--min-price", type=float, default=None, help="Minimum product price threshold")
-    parser.add_argument("--max-price", type=float, default=None, help="Maximum product price threshold")
-    args = parser.parse_args()
+def main(args=None, stop_event=None):
+    """
+    Run the AI duplicate search.
 
-    # Ensure output parent directory exists if a path is specified
-    output_dir = os.path.dirname(args.output)
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
+    Parameters
+    ----------
+    args : argparse.Namespace or None
+        Pre-built argument namespace. When None (default / CLI usage), arguments
+        are parsed from sys.argv as usual.
+    stop_event : threading.Event or None
+        Per-tab stop signal for GUI usage. When set the search aborts at the
+        next check_stop() call without touching the global stop_requested flag.
+        Pass None for CLI usage.
+    """
+    # Install per-thread stop event so check_stop() picks it up without globals
+    _stop_event_local.event = stop_event
 
-    # Verify each query path exists individually
-    query_paths = [q.strip() for q in args.query.split(";") if q.strip()]
-    for q in query_paths:
-        if not os.path.exists(q):
-            print(f"Error: Query image '{q}' not found.")
-            return
-
-    # Check if input path exists, or try falling back to input_data folder
-    input_path = args.input
-    if not os.path.exists(input_path):
-        fallback_path = os.path.join("input_data", input_path)
-        if os.path.exists(fallback_path):
-            input_path = fallback_path
-        else:
-            print(f"Error: Input dataset path '{input_path}' not found.")
-            return
-
-    if not os.path.exists(args.image_dir):
-        os.makedirs(args.image_dir, exist_ok=True)
-
-    # 1. Load spreadsheet database
     try:
-        df = load_dataset(input_path)
-    except Exception as e:
-        print(f"Error loading dataset: {e}")
-        return
+        if args is None:
+            # CLI path — parse from sys.argv as before
+            parser = argparse.ArgumentParser(description="AI-powered duplicate listing search using rclip (CLIP).")
+            parser.add_argument("--query", default="/Users/mabdurrafey/Downloads/61ec5bb0-fe2c-4245-89fd-2f3e341e1e46.avif;/Users/mabdurrafey/Downloads/04429c3c-f63c-47a5-b709-06892999e7da.avif", help="Path to local query image")
+            import glob
+            excel_files = sorted(glob.glob("input_data/*.xlsx"))
+            default_input = excel_files[0] if excel_files else "input_data"
+            parser.add_argument("--input", default=default_input, help=f"Dataset Excel path or directory containing Excel files (default: {default_input})")
+            parser.add_argument("--output", default="temp/search_results_ai.json", help="Path to save search results JSON")
+            parser.add_argument("--top", type=int, default=500, help="Number of top visual matches to retrieve (default: 500)")
+            parser.add_argument("--min-score", type=float, default=0.20, help="Minimum AI similarity score threshold (default: 0.20)")
+            parser.add_argument("--min-text-sim", type=float, default=0.70, help="Minimum semantic text similarity score (default: 0.70, set to 0.0 to disable)")
+            parser.add_argument("--strict", action="store_true", help="Enforce strict alphanumeric model code matching")
+            parser.add_argument("--query-title", default="", help="Pasted title text to use as reference baseline for semantic text similarity")
+            parser.add_argument("--image-dir", default="downloaded_images", help="Directory where database images are stored")
+            parser.add_argument("--workers", type=int, default=10, help="Number of download workers")
+            parser.add_argument("--no-indexing", action="store_true", help="Skip checking/indexing images in the target directory")
+            parser.add_argument("--min-price", type=float, default=None, help="Minimum product price threshold")
+            parser.add_argument("--max-price", type=float, default=None, help="Maximum product price threshold")
+            args = parser.parse_args()
 
-    # Filter by Price Range if specified
-    if (args.min_price is not None) or (args.max_price is not None):
-        if 'Price' in df.columns:
-            # Convert Price to numeric, forcing invalid parsing to NaN
-            df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
-            original_len = len(df)
-            if args.min_price is not None:
-                print(f"Filtering database: Min Price >= {args.min_price} AED")
-                df = df[df['Price'] >= args.min_price]
-            if args.max_price is not None:
-                print(f"Filtering database: Max Price <= {args.max_price} AED")
-                df = df[df['Price'] <= args.max_price]
-            print(f"Price filtering complete: kept {len(df)} of {original_len} products.")
-        else:
-            print("Warning: 'Price' column not found in dataset. Price filtering skipped.")
+        # Ensure output parent directory exists if a path is specified
+        output_dir = os.path.dirname(args.output)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
 
-    # 2. Resolve query reference title for similarity checks
-    reference_title = resolve_reference_title(df, args.query, args.query_title)
+        # Verify each query path exists individually
+        query_paths = [q.strip() for q in args.query.split(";") if q.strip()]
+        for q in query_paths:
+            if not os.path.exists(q):
+                print(f"Error: Query image '{q}' not found.")
+                return
 
-    check_stop()
+        # Check if input path exists, or try falling back to input_data folder
+        input_path = args.input
+        if not os.path.exists(input_path):
+            fallback_path = os.path.join("input_data", input_path)
+            if os.path.exists(fallback_path):
+                input_path = fallback_path
+            else:
+                print(f"Error: Input dataset path '{input_path}' not found.")
+                return
 
-    # 4. Filter downloader queue by title overlap
-    download_df = df
-    if reference_title:
-        print("Pre-filtering database to download images only for keyword-overlapping products...")
-        matching_indices = []
-        for idx, row in df.iterrows():
-            check_stop()
-            title = str(row.get('Title', ''))
-            if title and get_title_similarity(reference_title, title) > 0.0:
-                matching_indices.append(idx)
-        if matching_indices:
-            download_df = df.loc[matching_indices]
-            print(f"Filtered download queue: {len(download_df)} products with keyword overlap (down from {len(df)} total).")
-        else:
-            print("Warning: No products found with keyword overlap. Downloading all missing images as fallback.")
+        if not os.path.exists(args.image_dir):
+            os.makedirs(args.image_dir, exist_ok=True)
 
-    check_stop()
+        # 1. Load spreadsheet database
+        try:
+            df = load_dataset(input_path)
+        except Exception as e:
+            print(f"Error loading dataset: {e}")
+            return
 
-    # 5. Automatically download missing images
-    download_missing_images(download_df, image_dir=args.image_dir, max_workers=args.workers)
+        # Filter by Price Range if specified
+        if (args.min_price is not None) or (args.max_price is not None):
+            if 'Price' in df.columns:
+                df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
+                original_len = len(df)
+                if args.min_price is not None:
+                    print(f"Filtering database: Min Price >= {args.min_price} AED")
+                    df = df[df['Price'] >= args.min_price]
+                if args.max_price is not None:
+                    print(f"Filtering database: Max Price <= {args.max_price} AED")
+                    df = df[df['Price'] <= args.max_price]
+                print(f"Price filtering complete: kept {len(df)} of {original_len} products.")
+            else:
+                print("Warning: 'Price' column not found in dataset. Price filtering skipped.")
 
-    check_stop()
+        # 2. Resolve query reference title for similarity checks
+        reference_title = resolve_reference_title(df, args.query, args.query_title)
 
-    # 6. Run visual similarity search (in-process rclip)
-    visual_scores = run_visual_search(args.image_dir, args.query, no_indexing=args.no_indexing)
+        check_stop()
 
-    check_stop()
+        # 4. Filter downloader queue by title overlap
+        download_df = df
+        if reference_title:
+            print("Pre-filtering database to download images only for keyword-overlapping products...")
+            matching_indices = []
+            for idx, row in df.iterrows():
+                check_stop()
+                title = str(row.get('Title', ''))
+                if title and get_title_similarity(reference_title, title) > 0.0:
+                    matching_indices.append(idx)
+            if matching_indices:
+                download_df = df.loc[matching_indices]
+                print(f"Filtered download queue: {len(download_df)} products with keyword overlap (down from {len(df)} total).")
+            else:
+                print("Warning: No products found with keyword overlap. Downloading all missing images as fallback.")
 
-    # 7. Fallback to Rank 1 match if reference title wasn't found earlier
-    if not reference_title and visual_scores:
-        reference_title = resolve_reference_title(df, args.query, args.query_title, visual_scores)
+        check_stop()
 
-    check_stop()
+        # 5. Automatically download missing images
+        download_missing_images(download_df, image_dir=args.image_dir, max_workers=args.workers)
 
-    # 8. Run semantic text search
-    text_matches = []
-    if reference_title:
-        text_matches = run_semantic_text_search(df, reference_title, visual_scores, args.min_text_sim, args.strict)
+        check_stop()
 
-    check_stop()
+        # 6. Run visual similarity search (in-process rclip)
+        visual_scores = run_visual_search(args.image_dir, args.query, no_indexing=args.no_indexing)
 
-    # 9. Format, sort, save and print results
-    max_score = max(visual_scores.values()) if visual_scores else 0.0
-    dynamic_min_score = max(args.min_score, max_score - 0.45)
-    print(f"Top visual score: {max_score:.3f} | Dynamic visual threshold: {dynamic_min_score:.3f}")
-    save_and_display_results(text_matches, visual_scores, args.output, args.top, dynamic_min_score)
+        check_stop()
+
+        # 7. Fallback to Rank 1 match if reference title wasn't found earlier
+        if not reference_title and visual_scores:
+            reference_title = resolve_reference_title(df, args.query, args.query_title, visual_scores)
+
+        check_stop()
+
+        # 8. Run semantic text search
+        text_matches = []
+        if reference_title:
+            text_matches = run_semantic_text_search(df, reference_title, visual_scores, args.min_text_sim, args.strict)
+
+        check_stop()
+
+        # 9. Format, sort, save and print results
+        max_score = max(visual_scores.values()) if visual_scores else 0.0
+        dynamic_min_score = max(args.min_score, max_score - 0.45)
+        print(f"Top visual score: {max_score:.3f} | Dynamic visual threshold: {dynamic_min_score:.3f}")
+        save_and_display_results(text_matches, visual_scores, args.output, args.top, dynamic_min_score)
+
+    finally:
+        # Always clear the per-thread stop event when done
+        _stop_event_local.event = None
 
 if __name__ == "__main__":
     main()

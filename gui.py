@@ -103,9 +103,6 @@ thread_safe_stderr = ThreadSafeStdoutRedirector(sys.stderr)
 sys.stdout = thread_safe_stdout
 sys.stderr = thread_safe_stderr
 
-# Global lock to prevent concurrent tabs from overwriting sys.argv simultaneously
-_match_lock = threading.Lock()
-
 class SearchTab(ttk.Frame):
     def __init__(self, parent, tab_id, main_app):
         super().__init__(parent)
@@ -412,89 +409,79 @@ class SearchTab(ttk.Frame):
         self.log_text.delete("1.0", tk.END)
         self.append_log(f"Starting AI Product Duplicate Finder (Tab #{self.tab_id})...\n")
         
+        self.stop_event = threading.Event()
         thread = threading.Thread(target=self.run_matching_search, args=(query_image, query_title))
         thread.daemon = True
         thread.start()
+
 
     def append_log(self, text):
         self.log_text.insert(tk.END, text)
         self.log_text.see(tk.END)
 
     def run_matching_search(self, image_path, query_title):
+        import argparse, datetime
         tid = threading.get_ident()
         redirector = CustomStdout(self.main_app.root, self.log_text, self.status_var, self.progress)
-        
+
         # Register thread redirection
         thread_safe_stdout.redirectors[tid] = redirector
         thread_safe_stderr.redirectors[tid] = redirector
-        
+
         try:
             os.makedirs("temp", exist_ok=True)
             selected_excel_name = self.selected_excel_var.get().strip()
             excel_path = os.path.join("input_data", selected_excel_name)
-            
-            # Acquire lock so concurrent tabs don't overwrite each other's sys.argv
-            self.main_app.root.after(0, self.status_var.set, "Waiting for other tab to finish indexing...")
-            with _match_lock:
-                old_argv = sys.argv
-                sys.argv = [
-                    "match_image_ai.py",
-                    "--query", image_path,
-                    "--query-title", query_title,
-                    "--input", excel_path,
-                    "--output", f"temp/search_results_ai_{self.tab_id}.json",
-                    "--workers", self.workers_var.get(),
-                    "--top", self.top_var.get(),
-                    "--min-text-sim", f"{self.text_sim_var.get() / 100.0:.2f}",
-                    "--min-score", f"{self.img_sim_var.get():.2f}"
-                ]
 
-                min_p = self.min_price_var.get().strip()
-                max_p = self.max_price_var.get().strip()
-                if min_p:
-                    sys.argv.extend(["--min-price", min_p])
-                if max_p:
-                    sys.argv.extend(["--max-price", max_p])
-                if self.strict_var.get():
-                    sys.argv.append("--strict")
-                if self.no_indexing_var.get():
-                    sys.argv.append("--no-indexing")
+            # Build args namespace directly — no sys.argv mutation needed
+            min_p = self.min_price_var.get().strip()
+            max_p = self.max_price_var.get().strip()
+            args = argparse.Namespace(
+                query=image_path,
+                query_title=query_title,
+                input=excel_path,
+                output=f"temp/search_results_ai_{self.tab_id}.json",
+                workers=int(self.workers_var.get()),
+                top=int(self.top_var.get()),
+                min_text_sim=self.text_sim_var.get() / 100.0,
+                min_score=float(self.img_sim_var.get()),
+                min_price=float(min_p) if min_p else None,
+                max_price=float(max_p) if max_p else None,
+                strict=bool(self.strict_var.get()),
+                no_indexing=bool(self.no_indexing_var.get()),
+                image_dir="downloaded_images",
+            )
 
-                self.main_app.root.after(0, self.status_var.set, "Running AI visual search...")
+            self.main_app.root.after(0, self.status_var.set, "Running AI visual search...")
 
-                try:
-                    # Execute match_image_ai main method (serialized via _match_lock)
-                    match_image_ai.main()
-                
-                    import datetime
-                    # Slugify query_title for report filename
-                    slug = re.sub(r'[^a-zA-Z0-9_-]', '_', query_title).strip('_')
-                    if not slug:
-                        slug = "search_results"
-                    slug = slug[:50]
-                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    report_filename = f"{slug}_{timestamp}.html"
-                    report_path = os.path.join("reports", report_filename)
-                    os.makedirs("reports", exist_ok=True)
-                    self.last_report_path = report_path
+            # Run match_image_ai with per-tab stop event — fully parallel, no shared state
+            match_image_ai.main(args=args, stop_event=self.stop_event)
 
-                    # Execute generate_report html generator
-                    self.main_app.root.after(0, self.status_var.set, "Compiling search matches into HTML dashboard...")
-                    self.main_app.root.after(0, self.append_log, f"Generating {report_path} report...\n")
-                
-                    query_images_list = [p.strip() for p in image_path.split(";") if p.strip()]
-                    generate_report.generate_html_report(
-                        json_path=f"temp/search_results_ai_{self.tab_id}.json",
-                        output_html=report_path,
-                        excel_path=excel_path,
-                        query_title=query_title,
-                        query_images=query_images_list
-                    )
-                finally:
-                    sys.argv = old_argv
+            # Generate HTML report
+            slug = re.sub(r'[^a-zA-Z0-9_-]', '_', query_title).strip('_')
+            if not slug:
+                slug = "search_results"
+            slug = slug[:50]
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            report_filename = f"{slug}_{timestamp}.html"
+            report_path = os.path.join("reports", report_filename)
+            os.makedirs("reports", exist_ok=True)
+            self.last_report_path = report_path
+
+            self.main_app.root.after(0, self.status_var.set, "Compiling search matches into HTML dashboard...")
+            self.main_app.root.after(0, self.append_log, f"Generating {report_path} report...\n")
+
+            query_images_list = [p.strip() for p in image_path.split(";") if p.strip()]
+            generate_report.generate_html_report(
+                json_path=f"temp/search_results_ai_{self.tab_id}.json",
+                output_html=report_path,
+                excel_path=excel_path,
+                query_title=query_title,
+                query_images=query_images_list
+            )
 
             self.main_app.root.after(0, self.on_search_success)
-            
+
         except Exception as e:
             self.main_app.root.after(0, lambda err=str(e): self.on_search_error(err))
         finally:
@@ -507,8 +494,10 @@ class SearchTab(ttk.Frame):
             return
         self.append_log("\n[Stop Request Received] Aborting search...\n")
         self.status_var.set("Stopping execution...")
-        match_image_ai.stop_requested = True
+        # Signal only THIS tab's search — doesn't affect other running tabs
+        self.stop_event.set()
         self.stop_btn.config(state="disabled")
+
 
     def on_search_success(self):
         self.progress.stop()
