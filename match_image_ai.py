@@ -280,11 +280,13 @@ def run_visual_search(image_dir, query_path, no_indexing=False):
 
         # Step 2: Search in parallel — each tab opens its own DB connection
         # with no_indexing=True so ensure_index() is skipped entirely.
-        rclip_instance, rclip_model, rclip_db = init_rclip(
-            working_directory=abs_image_dir,
-            indexing_batch_size=32,
-            no_indexing=True
-        )
+        # Wrapped in _rclip_lock to prevent concurrent ONNX/CoreML model loading deadlocks.
+        with _rclip_lock:
+            rclip_instance, rclip_model, rclip_db = init_rclip(
+                working_directory=abs_image_dir,
+                indexing_batch_size=32,
+                no_indexing=True
+            )
         try:
             for q_path in abs_query_paths:
                 check_stop()
@@ -315,10 +317,11 @@ def run_semantic_text_search(df, reference_title, visual_scores, min_text_sim, s
     # Initialize CLIP model for semantic text similarity comparison
     print("Initializing CLIP text encoder for semantic text similarity...")
     try:
-        from rclip.model import Model as RClipModel
-        clip_model = RClipModel()
-        clip_model.ensure_downloaded()
-        ref_emb = clip_model.compute_text_features([reference_title])[0]
+        with _rclip_lock:
+            from rclip.model import Model as RClipModel
+            clip_model = RClipModel()
+            clip_model.ensure_downloaded()
+            ref_emb = clip_model.compute_text_features([reference_title])[0]
         print("CLIP text encoder successfully initialized.\n")
     except Exception as e:
         print(f"Warning: Could not initialize CLIP text model: {e}")
