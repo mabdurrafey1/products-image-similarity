@@ -98,20 +98,47 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
     min_db_price = int(min(prices)) if prices else 0
     max_db_price = int(max(prices)) if prices else 999
 
-    # Let's read attributes from the excel file to get any extra attributes for these SKUs
-    # mapping SKU -> extra columns
+    # Let's read attributes from the excel file(s) to get any extra attributes for these SKUs
+    # excel_path may be a single path or multiple ';'-separated paths (multi-file selection).
+    # Keyed by (source file basename, SKU uppercased) to avoid collisions across files.
     extra_attrs = {}
-    try:
-        df = load_excel_with_sheets(excel_path)
-        # Identify columns other than basic ones
-        standard_cols = {'SKU', 'Title', 'Price', 'Image URL', 'Source File'}
-        extra_cols = [col for col in df.columns if col not in standard_cols]
-        for _, row in df.iterrows():
-            sku = str(row.get('SKU', ''))
-            if sku:
-                extra_attrs[sku] = {col: row[col] for col in extra_cols if not pd.isna(row[col])}
-    except Exception as e:
-        print(f"Warning: Could not extract extra attributes from Excel: {e}")
+    excel_paths = [p.strip() for p in str(excel_path).split(";") if p.strip()]
+    for ep in excel_paths:
+        try:
+            df = load_excel_with_sheets(ep)
+            source_name = os.path.basename(ep)
+            # Identify columns other than basic ones
+            standard_cols = {'SKU', 'Title', 'Price', 'Image URL', 'Source File'}
+            extra_cols = [col for col in df.columns if col not in standard_cols]
+            for _, row in df.iterrows():
+                sku = str(row.get('SKU', ''))
+                if sku:
+                    extra_attrs[(source_name, sku.upper())] = {col: row[col] for col in extra_cols if not pd.isna(row[col])}
+        except Exception as e:
+            print(f"Warning: Could not extract extra attributes from '{ep}': {e}")
+
+    # Distinct source files present in the results, used to populate the sidebar filter
+    distinct_sources = []
+    seen_sources = set()
+    for item in results:
+        src = item.get('Source File', 'Unknown')
+        if src not in seen_sources:
+            seen_sources.add(src)
+            distinct_sources.append(src)
+    distinct_sources.sort()
+
+    source_filter_section = ""
+    if len(distinct_sources) > 1:
+        source_options_html = '<option value="all">All Files</option>' + "".join(
+            f'<option value="{src}">{src}</option>' for src in distinct_sources
+        )
+        source_filter_section = f"""
+            <div class="sidebar-section">
+                <label class="sidebar-label">SOURCE FILE</label>
+                <select id="sourceFilter" class="sidebar-select" onchange="applyFilters()">
+                    {source_options_html}
+                </select>
+            </div>"""
 
     html_content = """<!DOCTYPE html>
 <html lang="en">
@@ -477,6 +504,12 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
             color: #1e40af;
         }
 
+        .tag-source {
+            background: #fef3c7;
+            border: 1px solid #fde68a;
+            color: #92400e;
+        }
+
         /* Product Title */
         .product-title {
             font-size: 0.8rem;
@@ -706,7 +739,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                 </div>
                 <p class="sidebar-subtext">Database price range: {min_db_price} to {max_db_price} (strict filter)</p>
             </div>
-
+{source_filter_placeholder}
             <!-- SORT BY -->
             <div class="sidebar-section">
                 <label class="sidebar-label">SORT BY</label>
@@ -724,7 +757,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
             <div class="container">
                 <header>
                     <h1>AI Listing Matching Results</h1>
-                    <p>Database: {os.path.basename(excel_path)} | Matches Found: {total_matches}</p>
+                    <p>Database: {excel_display_name} | Matches Found: {total_matches}</p>
                 </header>
 
                 <div class="results-grid">
@@ -763,10 +796,12 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
         if not os.path.exists(image_path):
             html_image_path = "https://placehold.co/300x300/121829/ffffff?text=Image+Not+Found"
 
-        # Lookup extra attributes from the loaded Excel sheet
+        # Lookup extra attributes from the loaded Excel sheet(s), scoped to this result's source file
         sku_lookup = sku.upper()
-        matched_sku_key = next((k for k in extra_attrs if k.upper() == sku_lookup), None)
-        attrs = extra_attrs.get(matched_sku_key, {}) if matched_sku_key else {}
+        attrs = extra_attrs.get((source_file, sku_lookup))
+        if attrs is None:
+            # Fallback: match by SKU alone in case the source file couldn't be resolved
+            attrs = next((v for (src, sk), v in extra_attrs.items() if sk == sku_lookup), {})
 
         # Fetch extra fields
         zsku = sku
@@ -820,7 +855,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
 
         # Build card template
         html_content += f"""
-            <div class="match-card" data-sku="{sku}" data-zsku="{zsku}" data-rank="{rank}" data-vs="{ai_score if ai_score is not None else 0}" data-tx="{text_sim if text_sim is not None else 0}">
+            <div class="match-card" data-sku="{sku}" data-zsku="{zsku}" data-rank="{rank}" data-vs="{ai_score if ai_score is not None else 0}" data-tx="{text_sim if text_sim is not None else 0}" data-source="{source_file}">
                 <!-- Checkbox Row -->
                 <div class="card-select-row" style="display: flex; justify-content: space-between; align-items: center;">
                     <label>
@@ -857,6 +892,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                     {tags_html}
                     <span class="tag-pill">{img_count} imgs</span>
                     <span class="tag-pill tag-match">{match_badge_str}</span>
+                    <span class="tag-pill tag-source" title="Source Excel file">{source_file}</span>
                 </div>
 
                 <!-- SKU & ZSKU Side-by-Side Copy Container -->
@@ -985,6 +1021,8 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
             const startPrice = parseFloat(document.getElementById('startPrice').value) || 0;
             const endPrice = parseFloat(document.getElementById('endPrice').value) || Infinity;
             const sortBy = document.getElementById('sortBy').value;
+            const sourceFilterEl = document.getElementById('sourceFilter');
+            const sourceFilter = sourceFilterEl ? sourceFilterEl.value : 'all';
 
             const grid = document.querySelector('.results-grid');
             const cards = Array.from(document.querySelectorAll('.match-card'));
@@ -994,9 +1032,12 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                 const priceBadge = card.querySelector('.pill-price');
                 const priceText = priceBadge ? priceBadge.innerText.replace('AED', '').replace('N/A', '').trim() : '';
                 const price = parseFloat(priceText) || 0;
-                
+
                 let show = true;
                 if (price < startPrice || price > endPrice) {
+                    show = false;
+                }
+                if (sourceFilter !== 'all' && card.getAttribute('data-source') !== sourceFilter) {
                     show = false;
                 }
                 card.style.display = show ? 'flex' : 'none';
@@ -1076,7 +1117,10 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
 """
 
     # Format the header values
-    html_content = html_content.replace("{os.path.basename(excel_path)}", os.path.basename(excel_path))
+    excel_basenames = [os.path.basename(p) for p in excel_paths] if excel_paths else [os.path.basename(str(excel_path))]
+    excel_display_name = ", ".join(excel_basenames) if len(excel_basenames) <= 3 else f"{len(excel_basenames)} files"
+
+    html_content = html_content.replace("{excel_display_name}", excel_display_name)
     html_content = html_content.replace("{total_matches}", str(len(results)))
     html_content = html_content.replace("{best_visual}", f"{best_visual:.3f}" if best_visual else "N/A")
     html_content = html_content.replace("{best_text}", f"{best_text:.3f}" if best_text else "N/A")
@@ -1084,6 +1128,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
     html_content = html_content.replace("{max_db_price}", str(max_db_price))
     html_content = html_content.replace("{query_title_placeholder}", query_title_html)
     html_content = html_content.replace("{query_images_placeholder}", query_images_html)
+    html_content = html_content.replace("{source_filter_placeholder}", source_filter_section)
 
     with open(output_html, 'w', encoding='utf-8') as f:
         f.write(html_content)

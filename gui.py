@@ -193,22 +193,34 @@ class SearchTab(ttk.Frame):
         self.title_text = tk.Text(form_card, height=3, width=40, font=("Segoe UI", 10))
         self.title_text.grid(row=1, column=1, columnspan=2, padx=10, pady=10, sticky="we")
         
-        # 3. Input Source Row
-        source_label = ttk.Label(form_card, text="Input Source:")
-        source_label.grid(row=2, column=0, sticky="w", padx=10, pady=10)
-        
+        # 3. Input Source Row (multi-select)
+        source_label = ttk.Label(form_card, text="Input Source(s):")
+        source_label.grid(row=2, column=0, sticky="nw", padx=10, pady=10)
+
         import glob
         excel_files = sorted(glob.glob("input_data/*.xlsx"))
         self.excel_options = [os.path.basename(f) for f in excel_files]
-        if not self.excel_options:
-            self.excel_options = ["(No Excel files found)"]
-            
-        self.selected_excel_var = tk.StringVar(value=self.excel_options[0])
-        self.source_dropdown = ttk.Combobox(form_card, textvariable=self.selected_excel_var, values=self.excel_options, state="readonly", width=40)
-        self.source_dropdown.grid(row=2, column=1, padx=10, pady=10, sticky="w")
-        
+
+        source_container = ttk.Frame(form_card)
+        source_container.grid(row=2, column=1, padx=10, pady=10, sticky="we")
+
+        source_list_frame = ttk.Frame(source_container)
+        source_list_frame.pack(fill="x", expand=True)
+
+        self.source_listbox = tk.Listbox(source_list_frame, selectmode=tk.MULTIPLE, exportselection=False, height=4, font=("Segoe UI", 9))
+        self.source_listbox.pack(side="left", fill="both", expand=True)
+
+        source_scrollbar = ttk.Scrollbar(source_list_frame, orient="vertical", command=self.source_listbox.yview)
+        source_scrollbar.pack(side="left", fill="y")
+        self.source_listbox.config(yscrollcommand=source_scrollbar.set)
+
+        self._populate_source_listbox()
+
+        source_hint = ttk.Label(source_container, text="Click a file to select/deselect it — multiple files allowed", font=("Segoe UI", 8, "italic"))
+        source_hint.pack(anchor="w", pady=(2, 0))
+
         refresh_btn = ttk.Button(form_card, text="Refresh", command=self.refresh_excel_list)
-        refresh_btn.grid(row=2, column=2, padx=10, pady=10, sticky="w")
+        refresh_btn.grid(row=2, column=2, padx=10, pady=10, sticky="nw")
         
         # 3. Global Images Directory Row
         config = load_config()
@@ -359,19 +371,38 @@ class SearchTab(ttk.Frame):
         
         form_card.columnconfigure(1, weight=1)
 
+    def _populate_source_listbox(self):
+        self.source_listbox.delete(0, tk.END)
+        if not self.excel_options:
+            self.source_listbox.insert(tk.END, "(No Excel files found in input_data/)")
+            self.source_listbox.config(state="disabled")
+            return
+        self.source_listbox.config(state="normal")
+        for name in self.excel_options:
+            self.source_listbox.insert(tk.END, name)
+        # Select the first file by default
+        self.source_listbox.selection_set(0)
+
+    def get_selected_excel_files(self):
+        if not self.excel_options:
+            return []
+        selected_indices = self.source_listbox.curselection()
+        return [self.excel_options[i] for i in selected_indices if i < len(self.excel_options)]
+
     def refresh_excel_list(self):
         import glob
         excel_files = sorted(glob.glob("input_data/*.xlsx"))
+        previous_selection = set(self.get_selected_excel_files())
+
         self.excel_options = [os.path.basename(f) for f in excel_files]
-        if not self.excel_options:
-            self.excel_options = ["(No Excel files found)"]
-        
-        self.source_dropdown["values"] = self.excel_options
-        
-        # Keep current selection if still valid, otherwise reset to default
-        current_val = self.selected_excel_var.get()
-        if current_val not in self.excel_options:
-            self.selected_excel_var.set(self.excel_options[0])
+        self._populate_source_listbox()
+
+        # Restore any previously selected files that are still present
+        if previous_selection and self.excel_options:
+            self.source_listbox.selection_clear(0, tk.END)
+            for i, name in enumerate(self.excel_options):
+                if name in previous_selection:
+                    self.source_listbox.selection_set(i)
 
     def browse_image_dir(self):
         initial_dir = self.image_dir_var.get()
@@ -465,7 +496,11 @@ class SearchTab(ttk.Frame):
         if not query_image:
             messagebox.showerror("Error", "Please select a product query image first.")
             return
-            
+
+        if not self.get_selected_excel_files():
+            messagebox.showerror("Error", "Please select at least one input Excel file.")
+            return
+
         image_paths = [p.strip() for p in query_image.split(";") if p.strip()]
         for p in image_paths:
             if not os.path.exists(p):
@@ -502,8 +537,8 @@ class SearchTab(ttk.Frame):
 
         try:
             os.makedirs("temp", exist_ok=True)
-            selected_excel_name = self.selected_excel_var.get().strip()
-            excel_path = os.path.join("input_data", selected_excel_name)
+            selected_excel_names = self.get_selected_excel_files()
+            excel_path = ";".join(os.path.join("input_data", name) for name in selected_excel_names)
 
             # Build args namespace directly — no sys.argv mutation needed
             min_p = self.min_price_var.get().strip()

@@ -153,7 +153,27 @@ def load_excel_with_sheets(file_path):
         return normalize_dataframe(df)
 
 def load_dataset(input_path):
-    """Load dataset Excel files from a single file or a directory of files."""
+    """Load dataset Excel files from a single file, a directory, or multiple files
+    (either a list of paths or a single ';'-separated string of paths)."""
+    if isinstance(input_path, (list, tuple)):
+        paths = list(input_path)
+    else:
+        paths = [p.strip() for p in str(input_path).split(";") if p.strip()]
+
+    if len(paths) > 1:
+        print(f"Loading {len(paths)} selected Excel files...")
+        dfs = []
+        for p in paths:
+            try:
+                dfs.append(load_dataset(p))
+            except Exception as e:
+                print(f"Warning: Could not load '{p}': {e}")
+        if not dfs:
+            raise ValueError("Could not load any of the selected dataset files.")
+        return pd.concat(dfs, ignore_index=True)
+
+    input_path = paths[0] if paths else input_path
+
     if os.path.isdir(input_path):
         import glob
         excel_files = glob.glob(os.path.join(input_path, "*.xlsx"))
@@ -618,15 +638,25 @@ def main(args=None, stop_event=None):
                 print(f"Error: Query image '{q}' not found.")
                 return
 
-        # Check if input path exists, or try falling back to input_data folder
-        input_path = args.input
-        if not os.path.exists(input_path):
-            fallback_path = os.path.join("input_data", input_path)
-            if os.path.exists(fallback_path):
-                input_path = fallback_path
+        # Check if input path(s) exist, or try falling back to input_data folder.
+        # args.input may be a single path or multiple ';'-separated paths (multi-file selection).
+        raw_input_paths = [p.strip() for p in str(args.input).split(";") if p.strip()]
+        if not raw_input_paths:
+            print("Error: No input dataset path provided.")
+            return
+
+        resolved_input_paths = []
+        for p in raw_input_paths:
+            if os.path.exists(p):
+                resolved_input_paths.append(p)
             else:
-                print(f"Error: Input dataset path '{input_path}' not found.")
-                return
+                fallback_path = os.path.join("input_data", p)
+                if os.path.exists(fallback_path):
+                    resolved_input_paths.append(fallback_path)
+                else:
+                    print(f"Error: Input dataset path '{p}' not found.")
+                    return
+        input_path = resolved_input_paths
 
         args.image_dir = setup_global_image_dir(args.image_dir)
 
