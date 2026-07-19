@@ -1053,7 +1053,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
 
             // 1. Filter visibility
             cards.forEach(card => {
-                const priceBadge = card.querySelector('.pill-price');
+                const priceBadge = card.querySelector('.badge-price');
                 const priceText = priceBadge ? priceBadge.innerText.replace('AED', '').replace('N/A', '').trim() : '';
                 const price = parseFloat(priceText) || 0;
 
@@ -1082,8 +1082,8 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                     const txB = parseFloat(b.getAttribute('data-tx')) || 0;
                     return txB - txA;
                 } else if (sortBy === 'price-desc') {
-                    const priceBadgeA = a.querySelector('.pill-price');
-                    const priceBadgeB = b.querySelector('.pill-price');
+                    const priceBadgeA = a.querySelector('.badge-price');
+                    const priceBadgeB = b.querySelector('.badge-price');
                     const priceA = priceBadgeA ? parseFloat(priceBadgeA.innerText.replace('AED', '').replace('N/A', '').trim()) : 0;
                     const priceB = priceBadgeB ? parseFloat(priceBadgeB.innerText.replace('AED', '').replace('N/A', '').trim()) : 0;
                     
@@ -1096,8 +1096,8 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                     
                     return priceB - priceA;
                 } else if (sortBy === 'price-asc') {
-                    const priceBadgeA = a.querySelector('.pill-price');
-                    const priceBadgeB = b.querySelector('.pill-price');
+                    const priceBadgeA = a.querySelector('.badge-price');
+                    const priceBadgeB = b.querySelector('.badge-price');
                     const priceA = priceBadgeA ? parseFloat(priceBadgeA.innerText.replace('AED', '').replace('N/A', '').trim()) : Infinity;
                     const priceB = priceBadgeB ? parseFloat(priceBadgeB.innerText.replace('AED', '').replace('N/A', '').trim()) : Infinity;
                     
