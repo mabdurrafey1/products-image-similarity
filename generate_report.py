@@ -1035,7 +1035,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
             }
             if (items.length === 0) return;
             
-            const textToCopy = items.join('\n');
+            const textToCopy = items.join('\\n');
             navigator.clipboard.writeText(textToCopy).then(() => {
                 showToast("Copied " + items.length + " selected " + type.toUpperCase() + "s!");
             });
