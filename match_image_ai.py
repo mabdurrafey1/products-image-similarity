@@ -113,13 +113,19 @@ def normalize_dataframe(df):
         'sku': 'SKU',
         'Sku': 'SKU',
         'Product Title': 'Title',
-        'Main Image URL': 'Image URL'
+        'Main Image URL': 'Image URL',
+        'PartnerSKU': 'psku',
+        'PartnerSku': 'psku',
+        'partner_sku': 'psku',
+        'Partner SKU': 'psku',
+        'PSKU': 'psku',
+        'psku': 'psku'
     }
     
     rename_dict = {}
     assigned_targets = set(df.columns)
     
-    preferred_order = ['sku', 'Sku', 'Product Title', 'Main Image URL']
+    preferred_order = ['sku', 'Sku', 'Product Title', 'Main Image URL', 'PartnerSKU', 'PartnerSku', 'partner_sku', 'Partner SKU', 'PSKU', 'psku']
     
     for col in preferred_order:
         if col in df.columns and col in mapping:
@@ -403,10 +409,17 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
             price = row.get('Price', '')
             source_file = row.get('Source File', 'Unknown')
             
+            psku = row.get('psku', '')
+            if pd.isna(psku):
+                psku = ''
+            else:
+                psku = str(psku).strip()
+            
             results_data.append({
                 "Source File": str(source_file),
                 "Row": int(idx + 1),
                 "SKU": str(sku),
+                "psku": psku,
                 "Title": str(row.get('Title', '')),
                 "Price": float(price) if not pd.isna(price) else None,
                 "AI Score": score,

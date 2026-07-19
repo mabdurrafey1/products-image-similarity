@@ -8,13 +8,19 @@ def normalize_dataframe(df):
         'sku': 'SKU',
         'Sku': 'SKU',
         'Product Title': 'Title',
-        'Main Image URL': 'Image URL'
+        'Main Image URL': 'Image URL',
+        'PartnerSKU': 'psku',
+        'PartnerSku': 'psku',
+        'partner_sku': 'psku',
+        'Partner SKU': 'psku',
+        'PSKU': 'psku',
+        'psku': 'psku'
     }
     
     rename_dict = {}
     assigned_targets = set(df.columns)
     
-    preferred_order = ['sku', 'Sku', 'Product Title', 'Main Image URL']
+    preferred_order = ['sku', 'Sku', 'Product Title', 'Main Image URL', 'PartnerSKU', 'PartnerSku', 'partner_sku', 'Partner SKU', 'PSKU', 'psku']
     
     for col in preferred_order:
         if col in df.columns and col in mapping:
@@ -712,6 +718,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
     <div id="selectionPanel" class="selection-panel">
         <span class="selection-count">Selected: <span id="selectedCount">0</span> items</span>
         <button class="selection-btn selection-btn-copy" onclick="copySelected('sku')">Copy SKUs</button>
+        <button class="selection-btn selection-btn-copy" onclick="copySelected('psku')" style="background: #10b981;">Copy PSKUs</button>
         <button class="selection-btn selection-btn-copy" onclick="copySelected('zsku')">Copy ZSKUs</button>
         <button class="selection-btn selection-btn-clear" onclick="clearSelection()">Clear</button>
     </div>
@@ -805,6 +812,13 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
 
         # Fetch extra fields
         zsku = sku
+        psku = item.get('psku', '')
+        if not psku and attrs:
+            psku = attrs.get('psku', '')
+        if pd.isna(psku):
+            psku = ''
+        psku = str(psku).strip()
+
         brand = attrs.get('Brand', 'Generic')
         if pd.isna(brand):
             brand = 'Generic'
@@ -855,11 +869,11 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
 
         # Build card template
         html_content += f"""
-            <div class="match-card" data-sku="{sku}" data-zsku="{zsku}" data-rank="{rank}" data-vs="{ai_score if ai_score is not None else 0}" data-tx="{text_sim if text_sim is not None else 0}" data-source="{source_file}">
+            <div class="match-card" data-sku="{sku}" data-zsku="{zsku}" data-psku="{psku}" data-rank="{rank}" data-vs="{ai_score if ai_score is not None else 0}" data-tx="{text_sim if text_sim is not None else 0}" data-source="{source_file}">
                 <!-- Checkbox Row -->
                 <div class="card-select-row" style="display: flex; justify-content: space-between; align-items: center;">
                     <label>
-                        <input type="checkbox" class="select-checkbox" data-sku="{sku}" data-zsku="{zsku}" onchange="updateSelection()"> Select
+                        <input type="checkbox" class="select-checkbox" data-sku="{sku}" data-zsku="{zsku}" data-psku="{psku}" onchange="updateSelection()"> Select
                     </label>
                     <span class="rank-badge-container" style="font-size: 0.75rem; font-weight: 800; color: var(--color-blue); background: #eff6ff; padding: 2px 6px; border-radius: 4px; display: flex; gap: 6px; align-items: center;">
                         <span>Orig: #{rank}</span>
@@ -895,15 +909,15 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                     <span class="tag-pill tag-source" title="Source Excel file">{source_file}</span>
                 </div>
 
-                <!-- SKU & ZSKU Side-by-Side Copy Container -->
+                <!-- SKU & ZSKU/PSKU Side-by-Side Copy Container -->
                 <div class="sku-container-row" style="display: flex; gap: 6px; margin-bottom: 8px; width: 100%;">
                     <div class="sku-pill-half" onclick="copyTextDirect('{sku}')" title="Click to copy SKU" style="flex: 1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 5px 6px; display: flex; align-items: center; justify-content: space-between; font-size: 0.7rem; cursor: pointer; transition: all 0.15s ease; min-width: 0;">
                         <span style="font-weight: 700; color: #64748b; margin-right: 4px;">SKU:</span>
                         <span style="font-family: monospace; color: #334155; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-grow: 1; text-align: right;">{sku}</span>
                     </div>
-                    <div class="sku-pill-half" onclick="copyTextDirect('{zsku}')" title="Click to copy ZSKU" style="flex: 1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 5px 6px; display: flex; align-items: center; justify-content: space-between; font-size: 0.7rem; cursor: pointer; transition: all 0.15s ease; min-width: 0;">
-                        <span style="font-weight: 700; color: #64748b; margin-right: 4px;">ZSKU:</span>
-                        <span style="font-family: monospace; color: #334155; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-grow: 1; text-align: right;">{zsku}</span>
+                    <div class="sku-pill-half" onclick="copyTextDirect('{psku if psku else zsku}')" title="Click to copy { 'PSKU' if psku else 'ZSKU' }" style="flex: 1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 5px 6px; display: flex; align-items: center; justify-content: space-between; font-size: 0.7rem; cursor: pointer; transition: all 0.15s ease; min-width: 0;">
+                        <span style="font-weight: 700; color: #{ '10b981' if psku else '64748b' }; margin-right: 4px;">{ 'PSKU' if psku else 'ZSKU' }:</span>
+                        <span style="font-family: monospace; color: #334155; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-grow: 1; text-align: right;">{ psku if psku else zsku }</span>
                     </div>
                 </div>
 
@@ -916,7 +930,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                 <div class="actions-row">
                     <button class="action-btn btn-view" onclick="viewImage('{html_image_path}')">View</button>
                     <a class="action-btn btn-open" href="{product_url}" target="_blank">Open</a>
-                    <button class="action-btn btn-copy" onclick="copyTextDirect('{sku}')">Copy</button>
+                    <button class="action-btn btn-copy" onclick="copyTextDirect('{psku if psku else sku}')">Copy { 'PSKU' if psku else 'SKU' }</button>
                 </div>
             </div>
         """
@@ -976,16 +990,19 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
         /* Selection Feature Logic */
         let selectedSKUs = new Set();
         let selectedZSKUs = new Set();
+        let selectedPSKUs = new Set();
 
         function updateSelection() {
             const checkboxes = document.querySelectorAll('.select-checkbox');
             selectedSKUs.clear();
             selectedZSKUs.clear();
+            selectedPSKUs.clear();
 
             checkboxes.forEach(cb => {
                 if (cb.checked) {
                     selectedSKUs.add(cb.getAttribute('data-sku'));
                     selectedZSKUs.add(cb.getAttribute('data-zsku'));
+                    selectedPSKUs.add(cb.getAttribute('data-psku'));
                 }
             });
 
@@ -1008,10 +1025,17 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
         }
 
         function copySelected(type) {
-            const items = type === 'sku' ? Array.from(selectedSKUs) : Array.from(selectedZSKUs);
+            let items;
+            if (type === 'sku') {
+                items = Array.from(selectedSKUs);
+            } else if (type === 'psku') {
+                items = Array.from(selectedPSKUs).filter(x => x && x !== 'undefined' && x !== 'null' && x.trim() !== '');
+            } else {
+                items = Array.from(selectedZSKUs);
+            }
             if (items.length === 0) return;
             
-            const textToCopy = items.join('\\n');
+            const textToCopy = items.join('\n');
             navigator.clipboard.writeText(textToCopy).then(() => {
                 showToast("Copied " + items.length + " selected " + type.toUpperCase() + "s!");
             });
