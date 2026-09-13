@@ -523,12 +523,8 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
             color: var(--text-primary);
             line-height: 1.35;
             margin-bottom: 8px;
-            height: 2.2rem;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            min-height: 2.2rem;
+            word-break: break-word;
         }
 
         /* Category & Metadata Pills */
