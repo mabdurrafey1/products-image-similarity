@@ -569,8 +569,12 @@ class SearchTab(ttk.Frame):
             if not slug:
                 slug = "search_results"
             slug = slug[:50]
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            report_filename = f"{slug}_{timestamp}.html"
+            # Include the unique per-tab id (and microseconds) so concurrent tabs can
+            # never resolve to the same report file. Without this, image-only searches
+            # (blank title -> slug "search_results") finishing in the same second would
+            # overwrite each other's report, making one tab display another tab's results.
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            report_filename = f"{slug}_tab{self.tab_id}_{timestamp}.html"
             report_path = os.path.join("reports", report_filename)
             os.makedirs("reports", exist_ok=True)
             self.last_report_path = report_path
