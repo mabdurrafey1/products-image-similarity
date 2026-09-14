@@ -6,6 +6,7 @@ import threading
 import webbrowser
 import match_image_ai
 import generate_report
+import noon_store
 from PIL import Image, ImageTk
 import re
 import json
@@ -219,6 +220,23 @@ class SearchTab(ttk.Frame):
         source_hint = ttk.Label(source_container, text="Click a file to select/deselect it — multiple files allowed", font=("Segoe UI", 8, "italic"))
         source_hint.pack(anchor="w", pady=(2, 0))
 
+        # Fetch a public noon store into input_data, or add the new arrivals of fetched stores
+        store_row = ttk.Frame(source_container)
+        store_row.pack(fill="x", pady=(8, 0))
+
+        store_lbl = ttk.Label(store_row, text="Noon store link:")
+        store_lbl.pack(side="left", padx=(0, 5))
+
+        self.store_url_var = tk.StringVar(value=load_config().get("noon_store_url", ""))
+        store_entry = ttk.Entry(store_row, textvariable=self.store_url_var)
+        store_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+
+        self.fetch_store_btn = ttk.Button(store_row, text="Fetch Store", command=self.start_fetch_store)
+        self.fetch_store_btn.pack(side="left", padx=(0, 5))
+
+        self.refresh_listing_btn = ttk.Button(store_row, text="Refresh Listing", command=self.start_refresh_listing)
+        self.refresh_listing_btn.pack(side="left")
+
         refresh_btn = ttk.Button(form_card, text="Refresh", command=self.refresh_excel_list)
         refresh_btn.grid(row=2, column=2, padx=10, pady=10, sticky="nw")
         
@@ -300,8 +318,19 @@ class SearchTab(ttk.Frame):
         text_lbl = ttk.Label(text_frame, text="Text:")
         text_lbl.pack(side="left", padx=(0, 5))
 
-        self.text_sim_var = tk.DoubleVar(value=70.0)
-        self.sim_value_lbl = ttk.Label(text_frame, text="70%", font=("Segoe UI", 9, "bold"), width=5)
+        # Restore thresholds saved from a previous launch (clamped to slider ranges)
+        saved_config = load_config()
+        try:
+            saved_text_sim = min(max(float(saved_config.get("text_threshold", 70.0)), 0.0), 100.0)
+        except (TypeError, ValueError):
+            saved_text_sim = 70.0
+        try:
+            saved_img_sim = min(max(float(saved_config.get("image_threshold", 0.20)), 0.0), 2.0)
+        except (TypeError, ValueError):
+            saved_img_sim = 0.20
+
+        self.text_sim_var = tk.DoubleVar(value=saved_text_sim)
+        self.sim_value_lbl = ttk.Label(text_frame, text=f"{saved_text_sim:.0f}%", font=("Segoe UI", 9, "bold"), width=5)
 
         def update_sim_lbl(val):
             self.sim_value_lbl.config(text=f"{float(val):.0f}%")
@@ -317,8 +346,8 @@ class SearchTab(ttk.Frame):
         img_lbl = ttk.Label(img_frame, text="Image:")
         img_lbl.pack(side="left", padx=(0, 5))
 
-        self.img_sim_var = tk.DoubleVar(value=0.20)
-        self.img_sim_value_lbl = ttk.Label(img_frame, text="0.20", font=("Segoe UI", 9, "bold"), width=5)
+        self.img_sim_var = tk.DoubleVar(value=saved_img_sim)
+        self.img_sim_value_lbl = ttk.Label(img_frame, text=f"{saved_img_sim:.2f}", font=("Segoe UI", 9, "bold"), width=5)
 
         def update_img_sim_lbl(val):
             self.img_sim_value_lbl.config(text=f"{float(val):.2f}")
@@ -326,7 +355,12 @@ class SearchTab(ttk.Frame):
         self.img_sim_slider = ttk.Scale(img_frame, from_=0.0, to=2.0, variable=self.img_sim_var, orient="horizontal", command=update_img_sim_lbl)
         self.img_sim_slider.pack(side="left", fill="x", expand=True, padx=(0, 5))
         self.img_sim_value_lbl.pack(side="left")
-        
+
+        # Persist thresholds whenever they change (debounced so dragging doesn't spam writes)
+        self._threshold_save_job = None
+        self.text_sim_var.trace_add("write", self._schedule_threshold_save)
+        self.img_sim_var.trace_add("write", self._schedule_threshold_save)
+
         # Progress Bar & Status Row
         self.progress_frame = ttk.Frame(main_frame)
         self.progress_frame.pack(fill="x", pady=10)
@@ -404,6 +438,14 @@ class SearchTab(ttk.Frame):
                 if name in previous_selection:
                     self.source_listbox.selection_set(i)
 
+    def select_sources(self, paths):
+        """Add these input files to the selection."""
+        names = {os.path.basename(p) for p in paths}
+        for i, name in enumerate(self.excel_options):
+            if name in names:
+                self.source_listbox.selection_set(i)
+                self.source_listbox.see(i)
+
     def browse_image_dir(self):
         initial_dir = self.image_dir_var.get()
         if not os.path.exists(initial_dir):
@@ -476,6 +518,23 @@ class SearchTab(ttk.Frame):
         if path in self.selected_images:
             self.selected_images.remove(path)
             self.image_path_var.set(";".join(self.selected_images))
+
+    def _schedule_threshold_save(self, *_):
+        if self._threshold_save_job is not None:
+            self.after_cancel(self._threshold_save_job)
+        self._threshold_save_job = self.after(400, self._save_thresholds)
+
+    def _save_thresholds(self):
+        self._threshold_save_job = None
+        try:
+            text_val = round(float(self.text_sim_var.get()), 1)
+            img_val = round(float(self.img_sim_var.get()), 2)
+        except (tk.TclError, ValueError):
+            return
+        config = load_config()
+        config["text_threshold"] = text_val
+        config["image_threshold"] = img_val
+        save_config(config)
 
     def open_last_results(self):
         if hasattr(self, 'last_report_path') and os.path.exists(self.last_report_path):
@@ -603,7 +662,7 @@ class SearchTab(ttk.Frame):
     def stop_matching(self):
         if not self.is_running:
             return
-        self.append_log("\n[Stop Request Received] Aborting search...\n")
+        self.append_log("\n[Stop Request Received] Stopping...\n")
         self.status_var.set("Stopping execution...")
         # Signal only THIS tab's search — doesn't affect other running tabs
         self.stop_event.set()
@@ -635,6 +694,113 @@ class SearchTab(ttk.Frame):
             self.append_log(f"\n[ERROR] Process failed:\n{error_msg}\n")
             self.main_app.notebook.tab(self, text=f"Search Tab #{self.tab_id}")
             messagebox.showerror("Error During Matching", f"An error occurred:\n\n{error_msg}")
+
+    def start_fetch_store(self):
+        if self.is_running:
+            return
+        url = self.store_url_var.get().strip()
+        if not url:
+            messagebox.showerror("Error", "Paste the link of a noon store page first.")
+            return
+        try:
+            existing = noon_store.find_listing(url, "input_data")
+        except noon_store.StoreError as e:
+            messagebox.showerror("Error", str(e))
+            return
+        if existing and not messagebox.askyesno(
+                "Fetch Store", f"This store is already saved as '{os.path.basename(existing)}'.\n\n"
+                               "Fetch all of its products again? Refresh Listing only adds the new arrivals."):
+            return
+        config = load_config()
+        config["noon_store_url"] = url
+        save_config(config)
+        self._start_store_task("Opening the noon store...", self._fetch_store, url)
+
+    def start_refresh_listing(self):
+        if self.is_running:
+            return
+        paths = [os.path.join("input_data", name) for name in self.get_selected_excel_files()]
+        if not paths:
+            messagebox.showinfo("Refresh Listing", "Select a noon store file in Input Source(s) first.")
+            return
+        self._start_store_task("Checking for new arrivals...", self._refresh_listings, paths)
+
+    def _start_store_task(self, status, task, argument):
+        self.is_running = True
+        self.stop_event = threading.Event()
+        self.main_app.notebook.tab(self, text=f"Search Tab #{self.tab_id} ⏳")
+        for button in (self.run_btn, self.fetch_store_btn, self.refresh_listing_btn):
+            button.config(state="disabled")
+        self.stop_btn.config(state="normal")
+        self.progress.config(mode="indeterminate")
+        self.progress.start(10)
+        self.status_var.set(status)
+        self.log_text.delete("1.0", tk.END)
+        thread = threading.Thread(target=self._run_store_task, args=(task, argument))
+        thread.daemon = True
+        thread.start()
+
+    def _run_store_task(self, task, argument):
+        tid = threading.get_ident()
+        redirector = CustomStdout(self.main_app.root, self.log_text, self.status_var, self.progress)
+        thread_safe_stdout.redirectors[tid] = redirector
+        thread_safe_stderr.redirectors[tid] = redirector
+        try:
+            outcome = ("done",) + task(argument)
+        except noon_store.StopRequested:
+            outcome = ("stopped", "Stopped by user.", [])
+        except Exception as e:
+            outcome = ("error", str(e), [])
+        finally:
+            thread_safe_stdout.redirectors.pop(tid, None)
+            thread_safe_stderr.redirectors.pop(tid, None)
+            self.is_running = False
+        self.main_app.root.after(0, self._on_store_task_done, *outcome)
+
+    def _fetch_store(self, url):
+        def show_progress(done, total):
+            self.main_app.root.after(0, self._show_fetch_progress, done, total)
+        result = noon_store.fetch_store(url, "input_data", on_progress=show_progress, should_stop=self.stop_event.is_set)
+        return f"Saved {result.product_count:,} products from '{result.store_name}'.", [result.location]
+
+    def _show_fetch_progress(self, done, total):
+        if self.progress["mode"] != "determinate":
+            self.progress.stop()
+            self.progress.config(mode="determinate")
+        self.progress.config(maximum=total, value=min(done, total))
+        self.status_var.set(f"Fetching store products: {done:,} of {total:,}")
+
+    def _refresh_listings(self, paths):
+        refreshed, added = [], 0
+        for path in paths:
+            if not noon_store.is_listing(path):
+                print(f"Skipping '{os.path.basename(path)}': it wasn't made by Fetch Store.")
+                continue
+            result = noon_store.refresh_store(path, should_stop=self.stop_event.is_set)
+            refreshed.append(path)
+            added += result.added
+        if not refreshed:
+            raise noon_store.StoreError("None of the selected files is a noon store. Use Fetch Store to add one first.")
+        return f"Added {added:,} new products to {len(refreshed)} store listing(s).", refreshed
+
+    def _on_store_task_done(self, outcome, message, paths):
+        self.progress.stop()
+        self.progress.config(mode="indeterminate", maximum=100, value=0)  # searches report progress out of 100
+        for button in (self.run_btn, self.fetch_store_btn, self.refresh_listing_btn):
+            button.config(state="normal")
+        self.stop_btn.config(state="disabled")
+        self.main_app.notebook.tab(self, text=f"Search Tab #{self.tab_id}")
+        self.status_var.set(message)
+        if outcome == "error":
+            self.append_log(f"\n[ERROR] {message}\n")
+            messagebox.showerror("Noon Store", message)
+            return
+        self.append_log(f"\n[{'SUCCESS' if outcome == 'done' else 'STOPPED'}] {message}\n")
+        for tab in self.main_app.tabs:
+            tab.refresh_excel_list()
+        self.select_sources(paths)
+        if outcome == "done":
+            messagebox.showinfo("Noon Store", message)
 
     def close_tab(self):
         if self.is_running:

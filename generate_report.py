@@ -523,8 +523,42 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
             color: var(--text-primary);
             line-height: 1.35;
             margin-bottom: 8px;
-            min-height: 2.2rem;
+            height: 2.2rem;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            text-overflow: ellipsis;
             word-break: break-word;
+        }
+
+        .product-title.expanded {
+            height: auto;
+            min-height: 2.2rem;
+            display: block;
+            overflow: visible;
+        }
+
+        .title-toggle {
+            display: none;
+            align-self: flex-start;
+            background: none;
+            border: none;
+            padding: 0;
+            margin: -6px 0 8px;
+            font: inherit;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--color-blue);
+            cursor: pointer;
+        }
+
+        .title-toggle.visible {
+            display: inline-block;
+        }
+
+        .title-toggle:hover {
+            text-decoration: underline;
         }
 
         /* Category & Metadata Pills */
@@ -896,6 +930,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
 
                 <!-- Product Title -->
                 <div class="product-title" title="{title}">{title}</div>
+                <button type="button" class="title-toggle" onclick="toggleTitle(this)">Show more</button>
 
                 <!-- Tags / Custom attributes + Match Badge -->
                 <div class="tags-row">
@@ -982,6 +1017,37 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                 showToast("Copied: " + text);
             });
         }
+
+        /* Title expand/collapse: button only shows when the title overflows 2 lines */
+        function toggleTitle(btn) {
+            const titleEl = btn.previousElementSibling;
+            const expanded = titleEl.classList.toggle('expanded');
+            btn.innerText = expanded ? 'Show less' : 'Show more';
+        }
+
+        function updateTitleToggle(titleEl) {
+            const btn = titleEl.nextElementSibling;
+            if (!btn || !btn.classList.contains('title-toggle')) return;
+            if (titleEl.classList.contains('expanded')) {
+                btn.classList.add('visible');
+                return;
+            }
+            // Hidden (filtered-out) cards report 0 sizes; they get re-checked when shown
+            const overflows = titleEl.scrollHeight > titleEl.clientHeight + 1;
+            btn.classList.toggle('visible', overflows);
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const titles = document.querySelectorAll('.product-title');
+            // Re-check whenever a title's box changes (resize, filters showing a card)
+            const observer = new ResizeObserver(entries => {
+                entries.forEach(entry => updateTitleToggle(entry.target));
+            });
+            titles.forEach(t => {
+                updateTitleToggle(t);
+                observer.observe(t);
+            });
+        });
 
         /* Selection Feature Logic */
         let selectedSKUs = new Set();
