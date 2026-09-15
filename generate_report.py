@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import pandas as pd
 
 def normalize_dataframe(df):
@@ -741,6 +742,17 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
             from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
         }
+        /* Card parts (kept here rather than repeated inline on every card) */
+        .card-select-row { display: flex; justify-content: space-between; align-items: center; }
+        .rank-badge-container { font-size: 0.75rem; font-weight: 800; color: var(--color-blue); background: #eff6ff; padding: 2px 6px; border-radius: 4px; display: flex; gap: 6px; align-items: center; }
+        .new-rank-badge { color: #16a34a; background: #f0fdf4; padding: 1px 4px; border-radius: 2px; }
+        .image-container { position: relative; }
+        .badge-pair { display: flex; gap: 4px; }
+        .sku-container-row { display: flex; gap: 6px; margin-bottom: 8px; width: 100%; }
+        .sku-pill-half { flex: 1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 5px 6px; display: flex; align-items: center; justify-content: space-between; font-size: 0.7rem; cursor: pointer; transition: all 0.15s ease; min-width: 0; }
+        .sku-label { font-weight: 700; color: #64748b; margin-right: 4px; }
+        .sku-label.psku { color: #10b981; }
+        .sku-value { font-family: monospace; color: #334155; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-grow: 1; text-align: right; }
     </style>
 </head>
 <body>
@@ -780,12 +792,15 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
             <!-- SORT BY -->
             <div class="sidebar-section">
                 <label class="sidebar-label">SORT BY</label>
-                <select id="sortBy" class="sidebar-select" onchange="applyFilters()">
+                <select id="sortBy" class="sidebar-select" onchange="onSortFieldChange()">
                     <option value="rank">Rank / AI Score</option>
-                    <option value="vs-desc">VS (Visual Score)</option>
-                    <option value="tx-desc">TX (Text Score)</option>
-                    <option value="price-desc">Price: High to Low</option>
-                    <option value="price-asc">Price: Low to High</option>
+                    <option value="vs">VS (Visual Score)</option>
+                    <option value="tx">TX (Text Score)</option>
+                    <option value="price">Price</option>
+                </select>
+                <select id="sortDir" class="sidebar-select" style="margin-top: 8px;" onchange="applyFilters()">
+                    <option value="asc">Ascending</option>
+                    <option value="desc">Descending</option>
                 </select>
             </div>
         </aside>
@@ -897,74 +912,23 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
         image_ready_class = "ready" if (html_image_path and "Image+Not+Found" not in html_image_path) else "missing"
         image_status = "Available" if image_ready_class == "ready" else "Not Available"
 
-        # Build card template
-        html_content += f"""
-            <div class="match-card" data-sku="{sku}" data-zsku="{zsku}" data-psku="{psku}" data-rank="{rank}" data-vs="{ai_score if ai_score is not None else 0}" data-tx="{text_sim if text_sim is not None else 0}" data-source="{source_file}">
-                <!-- Checkbox Row -->
-                <div class="card-select-row" style="display: flex; justify-content: space-between; align-items: center;">
-                    <label>
-                        <input type="checkbox" class="select-checkbox" data-sku="{sku}" data-zsku="{zsku}" data-psku="{psku}" onchange="updateSelection()"> Select
-                    </label>
-                    <span class="rank-badge-container" style="font-size: 0.75rem; font-weight: 800; color: var(--color-blue); background: #eff6ff; padding: 2px 6px; border-radius: 4px; display: flex; gap: 6px; align-items: center;">
-                        <span>Orig: #{rank}</span>
-                        <span class="new-rank-badge" style="color: #16a34a; background: #f0fdf4; padding: 1px 4px; border-radius: 2px;">New: #{rank}</span>
-                    </span>
-                </div>
-
-                <!-- Main Image Container with overlays -->
-                <div class="image-container" style="position: relative;">
-                    <div class="verify-badge-overlay">
-                        <span class="verify-dot {url_ready_class}" title="URL Ready: {url_status}"></span>
-                        <span class="verify-dot {image_ready_class}" title="Image Ready: {image_status}"></span>
-                    </div>
-                    <img id="mainImg_{sku}" src="{html_image_path}" alt="{title}" onerror="this.src='https://placehold.co/300x300/121829/ffffff?text=Image+Not+Found'">
-                    
-                    <div class="image-bottom-overlay">
-                        <span class="overlay-badge badge-price">{price_str}</span>
-                        <div style="display: flex; gap: 4px;">
-                            <span class="overlay-badge badge-vs" title="Visual Similarity Score">{ai_score_str}</span>
-                            <span class="overlay-badge badge-tx" title="Text Similarity Score">{text_sim_str}</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Product Title -->
-                <div class="product-title" title="{title}">{title}</div>
-                <button type="button" class="title-toggle" onclick="toggleTitle(this)">Show more</button>
-
-                <!-- Tags / Custom attributes + Match Badge -->
-                <div class="tags-row">
-                    {tags_html}
-                    <span class="tag-pill">{img_count} imgs</span>
-                    <span class="tag-pill tag-match">{match_badge_str}</span>
-                    <span class="tag-pill tag-source" title="Source Excel file">{source_file}</span>
-                </div>
-
-                <!-- SKU & ZSKU/PSKU Side-by-Side Copy Container -->
-                <div class="sku-container-row" style="display: flex; gap: 6px; margin-bottom: 8px; width: 100%;">
-                    <div class="sku-pill-half" onclick="copyTextDirect('{sku}')" title="Click to copy SKU" style="flex: 1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 5px 6px; display: flex; align-items: center; justify-content: space-between; font-size: 0.7rem; cursor: pointer; transition: all 0.15s ease; min-width: 0;">
-                        <span style="font-weight: 700; color: #64748b; margin-right: 4px;">SKU:</span>
-                        <span style="font-family: monospace; color: #334155; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-grow: 1; text-align: right;">{sku}</span>
-                    </div>
-                    <div class="sku-pill-half" onclick="copyTextDirect('{psku if psku else zsku}')" title="Click to copy { 'PSKU' if psku else 'ZSKU' }" style="flex: 1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 5px 6px; display: flex; align-items: center; justify-content: space-between; font-size: 0.7rem; cursor: pointer; transition: all 0.15s ease; min-width: 0;">
-                        <span style="font-weight: 700; color: #{ '10b981' if psku else '64748b' }; margin-right: 4px;">{ 'PSKU' if psku else 'ZSKU' }:</span>
-                        <span style="font-family: monospace; color: #334155; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-grow: 1; text-align: right;">{ psku if psku else zsku }</span>
-                    </div>
-                </div>
-
-                <!-- Thumbnails Row -->
-                <div class="thumbnails-row">
-                    {thumbnails_html}
-                </div>
-
-                <!-- Action Buttons -->
-                <div class="actions-row">
-                    <button class="action-btn btn-view" onclick="viewImage('{html_image_path}')">View</button>
-                    <a class="action-btn btn-open" href="{product_url}" target="_blank">Open</a>
-                    <button class="action-btn btn-copy" onclick="copyTextDirect('{psku if psku else sku}')">Copy { 'PSKU' if psku else 'SKU' }</button>
-                </div>
-            </div>
-        """
+        # Build card template: compact markup, with the styling in the page's CSS classes, as a report holds
+        # hundreds of cards
+        vs_attr = round(ai_score, 4) if ai_score is not None else 0
+        tx_attr = round(text_sim, 4) if text_sim is not None else 0
+        second_id = psku if psku else zsku
+        second_label = 'PSKU' if psku else 'ZSKU'
+        second_class = ' psku' if psku else ''
+        html_content += f"""<div class="match-card" data-sku="{sku}" data-zsku="{zsku}" data-psku="{psku}" data-rank="{rank}" data-vs="{vs_attr}" data-tx="{tx_attr}" data-source="{source_file}">
+<div class="card-select-row"><label><input type="checkbox" class="select-checkbox" data-sku="{sku}" data-zsku="{zsku}" data-psku="{psku}" onchange="updateSelection()"> Select</label><span class="rank-badge-container"><span>Orig: #{rank}</span><span class="new-rank-badge">New: #{rank}</span></span></div>
+<div class="image-container"><div class="verify-badge-overlay"><span class="verify-dot {url_ready_class}" title="URL Ready: {url_status}"></span><span class="verify-dot {image_ready_class}" title="Image Ready: {image_status}"></span></div><img id="mainImg_{sku}" src="{html_image_path}" alt="" onerror="imgFallback(this)"><div class="image-bottom-overlay"><span class="overlay-badge badge-price">{price_str}</span><div class="badge-pair"><span class="overlay-badge badge-vs" title="Visual Similarity Score">{ai_score_str}</span><span class="overlay-badge badge-tx" title="Text Similarity Score">{text_sim_str}</span></div></div></div>
+<div class="product-title">{title}</div><button type="button" class="title-toggle" onclick="toggleTitle(this)">Show more</button>
+<div class="tags-row">{tags_html}<span class="tag-pill">{img_count} imgs</span><span class="tag-pill tag-match">{match_badge_str}</span><span class="tag-pill tag-source" title="Source Excel file">{source_file}</span></div>
+<div class="sku-container-row"><div class="sku-pill-half" onclick="copyTextDirect('{sku}')" title="Click to copy SKU"><span class="sku-label">SKU:</span><span class="sku-value">{sku}</span></div><div class="sku-pill-half" onclick="copyTextDirect('{second_id}')" title="Click to copy {second_label}"><span class="sku-label{second_class}">{second_label}:</span><span class="sku-value">{second_id}</span></div></div>
+<div class="thumbnails-row">{thumbnails_html}</div>
+<div class="actions-row"><button class="action-btn btn-view" onclick="viewImage('{html_image_path}')">View</button><a class="action-btn btn-open" href="{product_url}" target="_blank">Open</a><button class="action-btn btn-copy" onclick="copyTextDirect('{psku if psku else sku}')">Copy {'PSKU' if psku else 'SKU'}</button></div>
+</div>
+"""
 
     html_content += """
         </div>
@@ -977,6 +941,11 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
 
     <!-- Modals or full image viewer if needed -->
     <script>
+        function imgFallback(img) {
+            img.onerror = null;
+            img.src = 'https://placehold.co/300x300/121829/ffffff?text=Image+Not+Found';
+        }
+
         function swapMainImage(thumb, skuId) {
             const mainImg = document.getElementById("mainImg_" + skuId);
             if (mainImg) {
@@ -1103,6 +1072,13 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
             });
         }
 
+        // Picking a sort field switches to its natural direction: best rank first, highest scores first
+        function onSortFieldChange() {
+            const sortBy = document.getElementById('sortBy').value;
+            document.getElementById('sortDir').value = (sortBy === 'vs' || sortBy === 'tx') ? 'desc' : 'asc';
+            applyFilters();
+        }
+
         function applyFilters() {
             const startPrice = parseFloat(document.getElementById('startPrice').value) || 0;
             const endPrice = parseFloat(document.getElementById('endPrice').value) || Infinity;
@@ -1129,50 +1105,28 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                 card.style.display = show ? 'flex' : 'none';
             });
 
-            // 2. Sort card elements
-            cards.sort((a, b) => {
+            // 2. Sort card elements; cards without a value always go last, whichever the direction
+            const sortDir = document.getElementById('sortDir').value === 'desc' ? -1 : 1;
+            const sortValue = card => {
                 if (sortBy === 'rank') {
-                    const rankA = parseInt(a.getAttribute('data-rank')) || 9999;
-                    const rankB = parseInt(b.getAttribute('data-rank')) || 9999;
-                    return rankA - rankB;
-                } else if (sortBy === 'vs-desc') {
-                    const vsA = parseFloat(a.getAttribute('data-vs')) || 0;
-                    const vsB = parseFloat(b.getAttribute('data-vs')) || 0;
-                    return vsB - vsA;
-                } else if (sortBy === 'tx-desc') {
-                    const txA = parseFloat(a.getAttribute('data-tx')) || 0;
-                    const txB = parseFloat(b.getAttribute('data-tx')) || 0;
-                    return txB - txA;
-                } else if (sortBy === 'price-desc') {
-                    const priceBadgeA = a.querySelector('.badge-price');
-                    const priceBadgeB = b.querySelector('.badge-price');
-                    const priceA = priceBadgeA ? parseFloat(priceBadgeA.innerText.replace('AED', '').replace('N/A', '').trim()) : 0;
-                    const priceB = priceBadgeB ? parseFloat(priceBadgeB.innerText.replace('AED', '').replace('N/A', '').trim()) : 0;
-                    
-                    // Put N/A prices at the end
-                    const hasPriceA = !isNaN(priceA) && priceA > 0;
-                    const hasPriceB = !isNaN(priceB) && priceB > 0;
-                    if (!hasPriceA && hasPriceB) return 1;
-                    if (hasPriceA && !hasPriceB) return -1;
-                    if (!hasPriceA && !hasPriceB) return 0;
-                    
-                    return priceB - priceA;
-                } else if (sortBy === 'price-asc') {
-                    const priceBadgeA = a.querySelector('.badge-price');
-                    const priceBadgeB = b.querySelector('.badge-price');
-                    const priceA = priceBadgeA ? parseFloat(priceBadgeA.innerText.replace('AED', '').replace('N/A', '').trim()) : Infinity;
-                    const priceB = priceBadgeB ? parseFloat(priceBadgeB.innerText.replace('AED', '').replace('N/A', '').trim()) : Infinity;
-                    
-                    // Put N/A prices at the end
-                    const hasPriceA = !isNaN(priceA) && priceA !== Infinity;
-                    const hasPriceB = !isNaN(priceB) && priceB !== Infinity;
-                    if (!hasPriceA && hasPriceB) return 1;
-                    if (hasPriceA && !hasPriceB) return -1;
-                    if (!hasPriceA && !hasPriceB) return 0;
-                    
-                    return priceA - priceB;
+                    const rank = parseInt(card.getAttribute('data-rank'));
+                    return isNaN(rank) ? null : rank;
                 }
-                return 0;
+                if (sortBy === 'vs' || sortBy === 'tx') {
+                    const score = parseFloat(card.getAttribute('data-' + sortBy));
+                    return isNaN(score) ? null : score;
+                }
+                const priceBadge = card.querySelector('.badge-price');
+                const price = priceBadge ? parseFloat(priceBadge.innerText.replace('AED', '').replace('N/A', '').trim()) : NaN;
+                return isNaN(price) || price <= 0 ? null : price;
+            };
+            cards.sort((a, b) => {
+                const valueA = sortValue(a);
+                const valueB = sortValue(b);
+                if (valueA === null || valueB === null) {
+                    return (valueA === null) - (valueB === null);
+                }
+                return (valueA - valueB) * sortDir;
             });
 
             // 3. Re-append in sorted order and update new rank badges
@@ -1215,6 +1169,8 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
     html_content = html_content.replace("{query_title_placeholder}", query_title_html)
     html_content = html_content.replace("{query_images_placeholder}", query_images_html)
     html_content = html_content.replace("{source_filter_placeholder}", source_filter_section)
+    # Drop the indentation of every line (line breaks stay, so the script's // comments still end where they did)
+    html_content = re.sub(r"\n[ \t]+", "\n", html_content)
 
     with open(output_html, 'w', encoding='utf-8') as f:
         f.write(html_content)

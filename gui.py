@@ -7,6 +7,13 @@ import webbrowser
 import match_image_ai
 import generate_report
 import noon_store
+
+# Store links offered in the store box before any has been typed
+DEFAULT_STORE_LINKS = [
+    "https://www.noon.com/uae-en/p-19740/",  # TIGER
+    "https://www.noon.com/uae-en/p-27379/",  # JAJEEK
+    "https://www.noon.com/uae-en/p-82799/",  # ELTRAZONE
+]
 from PIL import Image, ImageTk
 import re
 import json
@@ -227,18 +234,18 @@ class SearchTab(ttk.Frame):
         store_lbl = ttk.Label(store_row, text="Noon store link:")
         store_lbl.pack(side="left", padx=(0, 5))
 
-        self.store_url_var = tk.StringVar(value=load_config().get("noon_store_url", ""))
-        store_entry = ttk.Entry(store_row, textvariable=self.store_url_var)
+        saved_url = load_config().get("noon_store_url", "")
+        store_links = DEFAULT_STORE_LINKS + ([saved_url] if saved_url and saved_url not in DEFAULT_STORE_LINKS else [])
+        self.store_url_var = tk.StringVar(value=saved_url or DEFAULT_STORE_LINKS[0])
+        store_entry = ttk.Combobox(store_row, textvariable=self.store_url_var, values=store_links)
         store_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
 
         self.fetch_store_btn = ttk.Button(store_row, text="Fetch Store", command=self.start_fetch_store)
-        self.fetch_store_btn.pack(side="left", padx=(0, 5))
+        self.fetch_store_btn.pack(side="left")
 
-        self.refresh_listing_btn = ttk.Button(store_row, text="Refresh Listing", command=self.start_refresh_listing)
-        self.refresh_listing_btn.pack(side="left")
-
-        refresh_btn = ttk.Button(form_card, text="Refresh", command=self.refresh_excel_list)
-        refresh_btn.grid(row=2, column=2, padx=10, pady=10, sticky="nw")
+        # Refresh adds the new arrivals of every fetched store
+        self.refresh_btn = ttk.Button(form_card, text="Refresh", command=self.start_refresh_listing)
+        self.refresh_btn.grid(row=2, column=2, padx=10, pady=10, sticky="nw")
         
         # 3. Global Images Directory Row
         config = load_config()
@@ -709,7 +716,7 @@ class SearchTab(ttk.Frame):
             return
         if existing and not messagebox.askyesno(
                 "Fetch Store", f"This store is already saved as '{os.path.basename(existing)}'.\n\n"
-                               "Fetch all of its products again? Refresh Listing only adds the new arrivals."):
+                               "Fetch all of its products again? Refresh only adds the new arrivals."):
             return
         config = load_config()
         config["noon_store_url"] = url
@@ -719,17 +726,19 @@ class SearchTab(ttk.Frame):
     def start_refresh_listing(self):
         if self.is_running:
             return
-        paths = [os.path.join("input_data", name) for name in self.get_selected_excel_files()]
+        self.refresh_excel_list()
+        paths = [os.path.join("input_data", name) for name in self.excel_options]
+        paths = [path for path in paths if noon_store.is_listing(path)]
         if not paths:
-            messagebox.showinfo("Refresh Listing", "Select a noon store file in Input Source(s) first.")
+            messagebox.showinfo("Refresh", "No noon stores saved yet. Use Fetch Store to add one first.")
             return
-        self._start_store_task("Checking for new arrivals...", self._refresh_listings, paths)
+        self._start_store_task("Checking stores for new arrivals...", self._refresh_listings, paths)
 
     def _start_store_task(self, status, task, argument):
         self.is_running = True
         self.stop_event = threading.Event()
         self.main_app.notebook.tab(self, text=f"Search Tab #{self.tab_id} ⏳")
-        for button in (self.run_btn, self.fetch_store_btn, self.refresh_listing_btn):
+        for button in (self.run_btn, self.fetch_store_btn, self.refresh_btn):
             button.config(state="disabled")
         self.stop_btn.config(state="normal")
         self.progress.config(mode="indeterminate")
@@ -786,7 +795,7 @@ class SearchTab(ttk.Frame):
     def _on_store_task_done(self, outcome, message, paths):
         self.progress.stop()
         self.progress.config(mode="indeterminate", maximum=100, value=0)  # searches report progress out of 100
-        for button in (self.run_btn, self.fetch_store_btn, self.refresh_listing_btn):
+        for button in (self.run_btn, self.fetch_store_btn, self.refresh_btn):
             button.config(state="normal")
         self.stop_btn.config(state="disabled")
         self.main_app.notebook.tab(self, text=f"Search Tab #{self.tab_id}")
@@ -822,9 +831,10 @@ class DuplicateFinderGUI:
         match_image_ai.setup_global_input_data_dir()
         self.root.title("AI Product Duplicate Finder")
         
-        screen_height = self.root.winfo_screenheight()
-        window_height = max(700, screen_height - 100)
-        self.root.geometry(f"1100x{window_height}")
+        # Full screen height, centred horizontally at the top of the screen
+        screen_width, screen_height = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        window_width = min(1100, screen_width)
+        self.root.geometry(f"{window_width}x{screen_height}+{(screen_width - window_width) // 2}+0")
         
         # Add new tab button header
         top_bar = ttk.Frame(root)

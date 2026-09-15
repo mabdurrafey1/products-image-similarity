@@ -1,6 +1,6 @@
 import os
 import requests
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def download_missing_images(df, image_dir="downloaded_images", max_workers=10):
     """
@@ -31,7 +31,6 @@ def download_missing_images(df, image_dir="downloaded_images", max_workers=10):
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        import threading
         from urllib3.util import Retry
         from requests.adapters import HTTPAdapter
         
@@ -47,18 +46,17 @@ def download_missing_images(df, image_dir="downloaded_images", max_workers=10):
         session.mount("http://", adapter)
         session.mount("https://", adapter)
         
-        progress_lock = threading.Lock()
-        completed = 0
         total = len(download_tasks)
 
+        # Runs in a worker thread; returns an error message instead of printing it, because the GUI shows only what
+        # the calling thread prints
         def download_single(task):
-            nonlocal completed
             sku, url, dest = task
             try:
                 try:
                     import match_image_ai
                     if getattr(match_image_ai, "stop_requested", False):
-                        return
+                        return None
                 except Exception:
                     pass
                 r = session.get(url, headers=headers, timeout=15)
@@ -66,9 +64,8 @@ def download_missing_images(df, image_dir="downloaded_images", max_workers=10):
                     # Check if the response is actually an image and not an HTML error page
                     content_type = r.headers.get('Content-Type', '').lower()
                     if 'html' in content_type:
-                        print(f"Failed downloading SKU {sku}: CDN returned HTML instead of image")
-                        return
-                    
+                        return f"Failed downloading SKU {sku}: CDN returned HTML instead of image"
+
                     # Try to load, resize, and compress the image
                     try:
                         from PIL import Image
@@ -83,18 +80,20 @@ def download_missing_images(df, image_dir="downloaded_images", max_workers=10):
                         with open(dest, 'wb') as f:
                             f.write(r.content)
                 else:
-                    print(f"Failed downloading SKU {sku}: status code {r.status_code}")
+                    return f"Failed downloading SKU {sku}: status code {r.status_code}"
             except Exception as e:
-                print(f"Failed downloading SKU {sku}: {e}")
-            finally:
-                with progress_lock:
-                    completed += 1
-                    pct = int((completed / total) * 100)
-                    print(f"\r[Download Progress] {pct}% ({completed}/{total})", end="", flush=True)
+                return f"Failed downloading SKU {sku}: {e}"
+            return None
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            executor.map(download_single, download_tasks)
-        print("Image download complete.\n")
+            futures = [executor.submit(download_single, task) for task in download_tasks]
+            for completed, future in enumerate(as_completed(futures), 1):
+                error = future.result()
+                if error:
+                    print(f"\n{error}")
+                pct = int((completed / total) * 100)
+                print(f"\r[Download Progress] {pct}% ({completed}/{total})", end="", flush=True)
+        print("\nImage download complete.\n")
     else:
         print("All database images are already cached locally.\n")
 

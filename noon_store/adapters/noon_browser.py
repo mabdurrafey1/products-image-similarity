@@ -22,8 +22,12 @@ BROWSER_ARGS = [
     "--window-position=-32000,-32000",  # off-screen: noon rejects headless browsers, but nobody needs to see it
     "--window-size=1280,900",
     "--blink-settings=imagesEnabled=false",  # nothing looks at the page, so its images needn't load
+    # Chrome slows the timers and work of windows nobody sees, which would stall the off-screen page
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
 ]
-CONCURRENCY = 8     # store pages loading at the same time
+CONCURRENCY = 8     # store pages loading at the same time; noon rate-limits (429) at 12
 BATCH_SIZE = 24     # pages per fetch_pages call: a few rounds of CONCURRENCY
 PAGE_TIMEOUT = 45   # seconds one page may take to load
 READY_TIMEOUT = 30  # seconds to wait, after opening the store, for noon's bot check to let its pages through
@@ -53,8 +57,14 @@ async ({urls, concurrency, timeout}) => {
             }
         }
     }
-    await Promise.all(Array.from({length: Math.min(concurrency, urls.length)}, worker));
-    return results;
+    // A page that stalls must not hang the whole fetch: stop waiting after every round could have timed out
+    const deadline = timeout * Math.ceil(urls.length / concurrency) + 5000;
+    await Promise.race([
+        Promise.all(Array.from({length: Math.min(concurrency, urls.length)}, worker)),
+        new Promise(resolve => setTimeout(resolve, deadline)),
+    ]);
+    next = urls.length;  // stop the workers from starting more pages
+    return Array.from(results, r => r || {status: 0, error: 'timed out'});
 }
 """
 
@@ -75,6 +85,7 @@ class NoonBrowserCatalog:
         try:
             self._browser = self._launch()
             self._page = self._browser.new_page()
+            self._minimize()
             self._open_store()
         except BaseException:
             self.__exit__()
@@ -124,6 +135,15 @@ class NoonBrowserCatalog:
             except Exception as e:
                 problems.append(f"{name}: {_first_line(e)}")
         raise StoreError("Fetching noon stores needs Google Chrome or Microsoft Edge installed.\n" + "\n".join(problems))
+
+    def _minimize(self):
+        """Minimize the window: macOS moves windows placed off-screen back into view."""
+        try:
+            cdp = self._page.context.new_cdp_session(self._page)
+            window = cdp.send("Browser.getWindowForTarget")["windowId"]
+            cdp.send("Browser.setWindowBounds", {"windowId": window, "bounds": {"windowState": "minimized"}})
+        except Exception:
+            pass  # a visible window still works
 
     def _open_store(self):
         """Open the store and wait until noon's bot check, which runs in the page, lets the store's pages through.
