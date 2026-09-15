@@ -62,6 +62,10 @@ def get_default_global_image_dir():
     return os.path.abspath(path)
 
 
+PROGRESS_MARK = "progress_line"  # start of the log line that progress updates keep redrawing
+TQDM_BAR_REGEX = re.compile(r"\s*\|[^|]*\|\s*")
+
+
 class CustomStdout:
     def __init__(self, root, log_text, status_var, progress_bar):
         self.root = root
@@ -75,32 +79,18 @@ class CustomStdout:
         self.root.after(0, self._safe_write, text)
 
     def _safe_write(self, text):
-        # Check if this is a progress bar update line
-        # tqdm updates usually end with \r or contain progress bars (e.g. 50%|███)
-        is_progress = '\r' in text or '%' in text
-        
-        if is_progress:
-            # Try to extract percentage
-            match = self.pct_regex.search(text)
-            if match:
-                percentage = int(match.group(1))
-                # Switch progressbar to determinate mode and show progress
-                if self.progress_bar["mode"] != "determinate":
-                    self.progress_bar.stop()
-                    self.progress_bar.config(mode="determinate")
-                self.progress_bar["value"] = percentage
-                if "download" in text.lower():
-                    self.status_var.set(f"Downloading images: {percentage}%...")
-                else:
-                    self.status_var.set(f"Scanning & indexing images: {percentage}%...")
-            
-            # Print minimal progress info to log to avoid bloating the text box
-            clean = text.replace('\r', '').strip()
-            if clean and ('%' in clean or 'it/s' in clean):
-                pass
+        # Progress updates (tqdm bars, download progress) start with \r and redraw the same line
+        if '\r' in text:
+            line = next((part.strip() for part in reversed(text.split('\r')) if part.strip()), "")
+            if line:
+                self._show_progress(line)
             return
 
-        # Normal logs get written to the text widget
+        # Normal logs get written to the text widget, below the last progress line
+        if PROGRESS_MARK in self.log_text.mark_names():
+            self.log_text.mark_unset(PROGRESS_MARK)
+            if not text.startswith('\n'):
+                text = '\n' + text
         self.log_text.insert(tk.END, text)
         self.log_text.see(tk.END)
         
@@ -119,6 +109,34 @@ class CustomStdout:
                 self.status_var.set("Calculating semantic text matching...")
             elif "Attaching visual similarity scores" in clean_line:
                 self.status_var.set("Applying rclip visual ranks...")
+
+    def _show_progress(self, line):
+        match = self.pct_regex.search(line)
+        if match:
+            percentage = int(match.group(1))
+            if self.progress_bar["mode"] != "determinate":
+                self.progress_bar.stop()
+                self.progress_bar.config(mode="determinate")
+            self.progress_bar["value"] = percentage
+            if "download" in line.lower():
+                self.status_var.set(f"Downloading images: {percentage}%...")
+            else:
+                self.status_var.set(f"Scanning & indexing images: {percentage}%...")
+
+        # Drop tqdm's bar drawing (" 45%|████   | 4654/10342 [...]") and keep the numbers
+        line = TQDM_BAR_REGEX.sub(" ", line).strip()
+        if "images" in line and "download" not in line.lower():
+            line = f"[Index] {line}"
+        # Replace the previous progress line in place instead of adding a line per update
+        if PROGRESS_MARK in self.log_text.mark_names():
+            self.log_text.delete(PROGRESS_MARK, "end-1c")
+        else:
+            if not self.log_text.index("end-1c").endswith(".0"):
+                self.log_text.insert(tk.END, "\n")
+            self.log_text.mark_set(PROGRESS_MARK, "end-1c")
+            self.log_text.mark_gravity(PROGRESS_MARK, "left")
+        self.log_text.insert(tk.END, line)
+        self.log_text.see(tk.END)
 
     def flush(self):
         pass
