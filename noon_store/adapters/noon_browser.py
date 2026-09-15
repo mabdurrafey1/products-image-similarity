@@ -31,7 +31,9 @@ CONCURRENCY = 8     # store pages loading at the same time; noon rate-limits (42
 BATCH_SIZE = 24     # pages per fetch_pages call: a few rounds of CONCURRENCY
 PAGE_TIMEOUT = 45   # seconds one page may take to load
 READY_TIMEOUT = 30  # seconds to wait, after opening the store, for noon's bot check to let its pages through
-ATTEMPTS = 3
+ATTEMPTS = 6
+MIN_CONCURRENCY = 2
+RATE_LIMIT_WAITS = (5, 10, 20, 30, 45)  # seconds to wait after noon refuses pages for coming too fast (429)
 
 # Runs inside the store page. Loads the given pages of the store CONCURRENCY at a time and returns, for each, the
 # part from the catalog data to the end of its script: about a quarter of the page, to keep the transfer small.
@@ -79,6 +81,7 @@ class NoonBrowserCatalog:
         self.store = store
         self.log = log or (lambda message: None)
         self._playwright = self._browser = self._page = None
+        self._concurrency = CONCURRENCY  # lowered while noon rate-limits
 
     def __enter__(self) -> NoonBrowserCatalog:
         self._playwright = sync_playwright().start()
@@ -106,9 +109,10 @@ class NoonBrowserCatalog:
         pages: list[Optional[CatalogPage]] = [None] * len(urls)
         missing = list(range(len(urls)))
         for attempt in range(1, ATTEMPTS + 1):
-            problems = []
+            problems, rate_limited = [], False
             for i, result in zip(missing, self._load([urls[i] for i in missing])):
                 if result.get("status") != 200:
+                    rate_limited = rate_limited or result.get("status") == 429
                     problems.append(result.get("error") or f"status {result.get('status')}")
                     continue
                 try:
@@ -118,13 +122,22 @@ class NoonBrowserCatalog:
             missing = [i for i in missing if pages[i] is None]
             if not missing:
                 return pages
-            if attempt < ATTEMPTS:
-                self.log(f"  {len(missing)} page(s) didn't load ({problems[0]}); reopening the store and retrying...")
-                time.sleep(3 * attempt)
-                try:
-                    self._open_store()
-                except Exception:
-                    pass  # the next attempt reports the failure
+            if attempt == ATTEMPTS:
+                break
+            if rate_limited:
+                # noon is asking for fewer requests: load fewer pages at once from now on and wait before retrying
+                self._concurrency = max(MIN_CONCURRENCY, self._concurrency // 2)
+                wait = RATE_LIMIT_WAITS[min(attempt, len(RATE_LIMIT_WAITS)) - 1]
+                self.log(f"  noon asked to slow down ({len(missing)} page(s) refused); waiting {wait}s and "
+                         f"continuing {self._concurrency} pages at a time...")
+                time.sleep(wait)
+                continue
+            self.log(f"  {len(missing)} page(s) didn't load ({problems[0]}); reopening the store and retrying...")
+            time.sleep(3 * attempt)
+            try:
+                self._open_store()
+            except Exception:
+                pass  # the next attempt reports the failure
         raise StoreError(f"noon.com kept refusing to load the store's pages ({problems[0]}). Try again later.")
 
     def _launch(self):
@@ -157,7 +170,7 @@ class NoonBrowserCatalog:
 
     def _load(self, urls: list[str]) -> list[dict]:
         try:
-            return self._page.evaluate(_LOAD_JS, {"urls": urls, "concurrency": CONCURRENCY,
+            return self._page.evaluate(_LOAD_JS, {"urls": urls, "concurrency": self._concurrency,
                                                   "timeout": PAGE_TIMEOUT * 1000})
         except Exception as e:  # the store page crashed or navigated away
             return [{"status": 0, "error": _first_line(e)}] * len(urls)
