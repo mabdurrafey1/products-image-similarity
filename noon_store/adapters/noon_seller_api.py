@@ -1,0 +1,479 @@
+"""noon Seller Center catalog adapter: reads a store's own products from noon's JSON APIs.
+
+The public store pages serve at most 10 pages of 200 products and carry no partner SKU. Seller Center
+answers the same catalog as JSON, 100 records a page and 100 pages deep, with the partner SKU on every
+record -- so a store is read from the account that owns it rather than scraped from its public pages.
+
+Each account is signed into once, by hand, in a Chrome profile of its own (noon_seller_stores lists them,
+one account per profile directory); the session then persists there, and later fetches reuse it in a
+window hidden the moment it opens -- off the edge of the screen where that works, and minimised on macOS,
+which ignores where a window is put. A store is read through the account that
+owns it, which the store's project code names. Headless is not an option: Seller Center drops the connection outright (ERR_HTTP2_PROTOCOL_ERROR)
+rather than answer a browser that announces itself as headless, and the only way around that would be to
+lie about what it is. Signing in stays visible, because only a person can do it. Nothing here reads, stores or replays a cookie or token: the requests are made from
+inside the signed-in page, so Chrome attaches its own session, and the headers the app sends are captured
+in memory for the length of one fetch only -- never printed, logged or written to disk.
+
+The cap on one query is worked around exactly as the use cases already do it, by narrowing: `family` is
+offered to the crawler as a top-level category and each family's `brand` facet as its children. Prices
+are not offered (`price_range` is None), so the crawler narrows by category alone.
+"""
+from __future__ import annotations
+
+import glob
+import json
+import os
+import re
+from dataclasses import dataclass
+from typing import Callable, Mapping, Optional, Sequence
+from urllib.parse import quote
+
+from ..domain import CatalogPage, CatalogQuery, Category, Product, StoreError, StoreRef
+from .window import hide_window
+
+PROFILE_DIR_ENV = "NOON_PROFILE"
+HEADED_ENV = "NOON_HEADED"   # set to watch a fetch on-screen; otherwise its window is hidden as it opens
+OFFSCREEN = ["--window-position=-32000,-32000", "--window-size=1440,900"]
+DEFAULT_PROFILE = "~/noon_seller_profile"
+# One Chrome profile directory per noon account, however many there are: a profile is one cookie jar, so
+# two accounts cannot share one. Signing into a new directory is the whole of adding an account.
+PROFILE_GLOB = "~/noon_seller_profile*"
+ACCOUNTS_FILE = "~/.noon_seller_accounts.json"   # which projects were found in which profile
+# noon has no endpoint that lists an account's projects -- every candidate 404s -- so a project is known
+# either because it was discovered in a session and written down, or because it is written down here.
+SEED = {DEFAULT_PROFILE: ("PRJ19740", "PRJ27379", "PRJ82799")}
+HOST = "https://noon-catalog.noon.partners"
+BASE = HOST + "/_vs/mp/mp-noon-catalog-api-rocket/"
+LIST_API = BASE + "offer/list/noon"
+FACETS_API = BASE + "offer/facets/noon"
+STORES_API = HOST + "/_vs/mp/mp-noon-merchant-api/noon-store/list"
+ENDPOINT = "offer/list/noon"      # the request whose headers and body carry the app's context
+CDN = "https://f.nooncdn.com/p/"
+
+PAGE_SIZE = 100    # the API's own maximum; more is silently served as 20
+MAX_PAGES = 100    # page 100 already returns nothing: the 10,000-record cap
+BATCH_SIZE = 20    # queries per fetch_pages call; a batch is also how often a fetch can report progress
+# Measured against the account: noon answers about 74 requests at full speed (roughly 6 a second) and then
+# grants about 2 a second. It limits the rate, not the number in flight -- asking for fewer at a time once
+# it starts refusing only reads slower, because the requests already in flight are what take up the rate as
+# noon frees it. So the number in flight never changes; a refused request waits a moment and asks again.
+CONCURRENCY = 8        # requests in flight, before and after the fast allowance is spent
+GAP = 0                # milliseconds a worker waits after a request; none is needed at this concurrency
+PAUSE = 1000           # milliseconds to wait before asking again for whatever was refused
+ATTEMPTS = 15          # tries at one refused request before giving up on it
+REQUEST_TIMEOUT = 60  # seconds one request may take
+READY_TIMEOUT = 45    # seconds to wait for the catalog page to make its first request
+
+# Only headers a page is allowed to set are worth sending; the rest are the browser's own.
+SEND_HEADERS = re.compile(r"^(x-|content-type$|accept$)")
+# The crawler's sort names, mapped to the orderings the API actually honours. Measured: offer_price,
+# stock, gmv and units_sold reorder results; views, price and net_stock are ignored by the API.
+SORTS = {("new_arrivals", "desc"): ("", ""), ("new_arrivals", "asc"): ("units_sold", "desc"),
+         ("price", "asc"): ("offer_price", "asc"), ("price", "desc"): ("offer_price", "desc")}
+SEPARATOR = "||"   # in a category code: "family||brand", or "family||brand<US>brand" for a group of brands
+BRAND_SEPARATOR = "\x1f"   # between the brands of one group; no brand name contains it
+GROUP_FILL = 0.9   # how full a group of brands may be packed, as a share of the cap
+COUNTRIES = {"uae": "AE", "ksa": "SA", "egypt": "EG"}
+
+# Runs inside the signed-in Seller Center page: posts the bodies, `concurrency` at a time.
+_POST_JS = """
+async ({url, bodies, headers, concurrency, timeout, gap}) => {
+    const results = new Array(bodies.length);
+    let next = 0;
+    async function worker() {
+        while (next < bodies.length) {
+            const i = next++;
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeout);
+            try {
+                const response = await fetch(url, {
+                    method: 'POST', credentials: 'include', headers: headers,
+                    body: JSON.stringify(bodies[i]), signal: controller.signal});
+                results[i] = {status: response.status,
+                              data: response.status === 200 ? await response.json() : null};
+            } catch (e) {
+                results[i] = {status: 0, error: String(e)};
+            } finally {
+                clearTimeout(timer);
+            }
+            if (gap) await new Promise(r => setTimeout(r, gap));
+        }
+    }
+    await Promise.all(Array.from({length: Math.min(concurrency, bodies.length)}, worker));
+    return Array.from(results, r => r || {status: 0, error: 'no result'});
+}
+"""
+
+
+@dataclass(frozen=True)
+class Account:
+    """One noon account: the Chrome profile it is signed into, and the projects known to live in it."""
+    profile: str                     # the profile directory; one account per directory
+    projects: tuple[str, ...] = ()   # empty until a session of its own says what it owns
+
+    @property
+    def label(self) -> str:
+        """What the account is called in a message: the name of its profile directory."""
+        return os.path.basename(self.profile.rstrip("/"))
+
+
+def _remembered(path: str) -> dict:
+    """The projects discovered in each profile so far; nothing at all before the first discovery."""
+    try:
+        with open(os.path.expanduser(path)) as handle:
+            found = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    return found if isinstance(found, dict) else {}
+
+
+def load_accounts(path: str = ACCOUNTS_FILE, pattern: str = PROFILE_GLOB,
+                  seed: Mapping[str, Sequence[str]] = SEED) -> tuple[Account, ...]:
+    """Every account somebody has signed into, in directory order.
+
+    An account with no projects yet is still an account: its own session is what names its project.
+    """
+    known = {os.path.expanduser(profile): tuple(projects) for profile, projects in seed.items()}
+    known.update({os.path.expanduser(profile): tuple(projects)
+                  for profile, projects in _remembered(path).items()})
+    return tuple(Account(profile=directory, projects=known.get(directory, ()))
+                 for directory in sorted(glob.glob(os.path.expanduser(pattern)))
+                 if os.path.isdir(directory))
+
+
+def remember_projects(profile: str, projects: Sequence[str], path: str = ACCOUNTS_FILE) -> None:
+    """Write down which projects a profile holds, so a later fetch knows which account owns a store."""
+    found = _remembered(path)
+    found[os.path.expanduser(profile)] = list(projects)
+    with open(os.path.expanduser(path), "w") as handle:
+        json.dump(found, handle, indent=2)
+
+
+def forget_profile(profile: str, path: str = ACCOUNTS_FILE) -> None:
+    """Drop what was written down about a profile that turned out not to be an account of its own.
+
+    A note left behind would be inherited by whoever signs into that directory name next, and a store
+    of theirs would then be fetched through somebody else's session.
+    """
+    found = _remembered(path)
+    if found.pop(os.path.expanduser(profile), None) is None:
+        return
+    with open(os.path.expanduser(path), "w") as handle:
+        json.dump(found, handle, indent=2)
+
+
+def profile_for_project(project: str, accounts: Sequence[Account] = ()) -> str:
+    """The profile signed into the account that owns a project.
+
+    Refusing beats guessing: fetching a store from the wrong account reads somebody else's catalog.
+    """
+    for account in accounts or load_accounts():
+        if project in account.projects:
+            return account.profile
+    raise StoreError(f"No signed-in noon account holds {project}. Use Load Stores to sign into the "
+                     f"account that owns this store.")
+
+
+def landed_project(headers: Mapping[str, str]) -> str:
+    """The project an account's own catalog asked for -- how an account nobody configured names itself."""
+    for name, value in headers.items():
+        if name.lower() == "x-project":
+            return value
+    return ""
+
+
+def _store_code(store: StoreRef) -> str:
+    """The Seller Center code of a public store link: p-19740 in the UAE is STR19740-NAE."""
+    digits = re.search(r"\d+", store.path or "")
+    if not digits:
+        raise StoreError(f"'{store.path}' doesn't look like a noon store page.")
+    return f"STR{digits.group(0)}-N{COUNTRIES.get(store.country, 'AE')}"
+
+
+def _project(store: StoreRef) -> str:
+    """A store's project shares its number: p-19740 belongs to PRJ19740."""
+    digits = re.search(r"\d+", store.path or "")
+    return f"PRJ{digits.group(0)}" if digits else ""
+
+
+def _fetch_profile(store: StoreRef, override: str = "", accounts: Sequence[Account] = ()) -> str:
+    """The profile a fetch opens: the one signed into the account that owns the store.
+
+    A store is read through its owner's session. Opening whichever account came first would read a
+    catalog that isn't this store's, so an unowned store is refused rather than guessed at.
+    """
+    if override:
+        return os.path.expanduser(override)
+    return profile_for_project(_project(store), accounts)
+
+
+def _image_url(raw: str) -> str:
+    return CDN + quote(raw, safe="/") + ".jpg?format=avif&width=800" if raw else ""
+
+
+def _filters(base: dict, category: Optional[str]) -> dict:
+    """The API filters for a category code: nothing, a family, or a family and one of its brands."""
+    filters = dict(base)
+    if not category:
+        return filters
+    family, _, brand = category.partition(SEPARATOR)
+    if family:
+        filters["family"] = [family]
+    if brand:
+        filters["brand"] = brand.split(BRAND_SEPARATOR)   # the API takes a list, so a group costs one request
+    return filters
+
+
+def _sort(query: CatalogQuery) -> tuple[str, str]:
+    return SORTS.get((query.sort_by, query.sort_dir), ("", ""))
+
+
+def _to_product(hit: dict, locale: str) -> Optional[Product]:
+    sku = hit.get("csku_parent") or hit.get("zsku_child") or hit.get("catalog_sku") or ""
+    if not sku:
+        return None
+    content = hit.get("content") or {}
+    offer = hit.get("offer_code") or ""
+    image = _image_url(content.get("image") or "")
+    price = hit.get("price")
+    return Product(
+        sku=sku,
+        title=content.get("title") or "",
+        brand=content.get("brand") or "",
+        price=float(price) if price is not None else None,
+        link=f"https://www.noon.com/{locale}/{sku}/p/" + (f"?o={offer}" if offer else ""),
+        image_urls=(image,) if image else (),
+        psku=str(hit.get("partner_sku") or ""),
+    )
+
+
+def _categories(category: Optional[str], facets: dict) -> tuple[Category, ...]:
+    """The narrowings offered for a page: the families of the store, or the brands within a family."""
+    if not category:
+        return tuple(Category(bucket["key"]) for bucket in facets.get("family") or [] if bucket.get("key"))
+    family = category.partition(SEPARATOR)[0]
+    groups = _brand_groups(facets.get("brand") or [], PAGE_SIZE * MAX_PAGES)
+    brands = tuple(Category(f"{family}{SEPARATOR}{BRAND_SEPARATOR.join(group)}") for group in groups)
+    return (Category(family, brands),) if brands else ()
+
+
+def _brand_groups(buckets: list, cap: int) -> list[list[str]]:
+    """Brands packed into as few groups as fit under the cap, largest first.
+
+    A family over the cap is split by brand, but asking for one brand at a time costs a request per brand
+    even where a hundred brands share a few hundred products. The API filters on a list of brands, so the
+    brands are packed into groups instead: a family of 129 brands becomes two or three requests."""
+    named = [(b["key"], int(b.get("doc_count") or 0)) for b in buckets if b.get("key")]
+    named.sort(key=lambda pair: pair[1], reverse=True)
+    room = max(1, int(cap * GROUP_FILL))
+    groups: list[list[str]] = []
+    sizes: list[int] = []
+    for brand, count in named:
+        for i, size in enumerate(sizes):
+            if size + count <= room:
+                groups[i].append(brand)
+                sizes[i] = size + count
+                break
+        else:
+            groups.append([brand])
+            sizes.append(count)
+    return groups
+
+
+class NoonSellerApiCatalog:
+    """CatalogGateway reading one store from the signed-in Seller Center account.
+
+    Use it as a context manager; the browser closes, keeping its session, on exit.
+    """
+    page_size = PAGE_SIZE
+    max_pages = MAX_PAGES
+    batch_size = BATCH_SIZE
+
+    def __init__(self, store: StoreRef, log: Optional[Callable[[str], None]] = None):
+        self.store = store
+        self.log = log or (lambda message: None)
+        self.store_name = ""
+        self._playwright = self._context = self._page = None
+        self._concurrency = CONCURRENCY
+        self._gap = GAP
+        self._throttled = False   # whether the fast allowance has already been reported as spent
+        self._headers: dict = {}
+        self._base_body: dict = {}
+        self._base_filters: dict = {}
+
+    def __enter__(self) -> "NoonSellerApiCatalog":
+        from playwright.sync_api import sync_playwright
+
+        profile = _fetch_profile(self.store, os.environ.get(PROFILE_DIR_ENV, ""))
+        if not os.path.isdir(profile) or not os.listdir(profile):
+            raise StoreError("No noon Seller Center session yet. Use Load Stores to sign in once, "
+                             "then fetch the store again.")
+        self._playwright = sync_playwright().start()
+        try:
+            headed = bool(os.environ.get(HEADED_ENV))
+            try:
+                # A real browser, off the edge of the screen -- see the note at the top on why not headless.
+                # The window still lays the catalog out, which is what makes the app send the request read here.
+                self._context = self._playwright.chromium.launch_persistent_context(
+                    user_data_dir=profile, channel="chrome", headless=False, viewport=None,
+                    args=["--start-maximized"] if headed else OFFSCREEN)
+            except Exception as e:
+                # Chrome refuses a profile a second browser already has, rather than share it. Since a fetch
+                # is now invisible, saying so plainly is the only way to tell one is already under way.
+                if "ProcessSingleton" in str(e) or "SingletonLock" in str(e):
+                    raise StoreError("A noon fetch is already running. Wait for it to finish and try again "
+                                     "-- two at once would corrupt the signed-in profile.") from e
+                raise
+            self._page = self._context.pages[0] if self._context.pages else self._context.new_page()
+            if not headed:
+                # macOS ignores --window-position, so an unwanted window has to be minimised to go away
+                hide_window(self._page)
+            self._open_catalog()
+            self.store_name = self._name_of_store()
+        except BaseException:
+            self.__exit__()
+            raise
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self._headers.clear()   # drop the captured context as soon as it is done with
+        try:
+            if self._context:
+                self._context.close()   # clean exit, so the profile keeps the session for next time
+        except Exception:
+            pass
+        finally:
+            if self._playwright:
+                self._playwright.stop()
+
+    def fetch_pages(self, queries: Sequence[CatalogQuery]) -> list[CatalogPage]:
+        """The page for each query. The requests are made concurrently from inside the page."""
+        totals = self._post_all(LIST_API, [self._body(query) for query in queries])
+
+        # Facets are only worth asking for where the crawler will have to narrow: a page over the cap.
+        over = [i for i, data in enumerate(totals) if (data.get("total") or 0) > self.page_size * self.max_pages]
+        facets: dict[int, dict] = {}
+        if over:
+            replies = self._post_all(FACETS_API, [self._body(queries[i], page=1) for i in over])
+            facets = dict(zip(over, replies))
+
+        pages = []
+        for i, (query, data) in enumerate(zip(queries, totals)):
+            products = tuple(p for p in (_to_product(hit, self.store.locale) for hit in data.get("hits") or []) if p)
+            pages.append(CatalogPage(
+                total=int(data.get("total") or 0),
+                products=products,
+                store_name=self.store_name,
+                price_range=None,   # the API narrows by family and brand, not by price
+                categories=_categories(query.category, facets.get(i, {})),
+            ))
+        return pages
+
+    def _post_all(self, url: str, bodies: list[dict]) -> list[dict]:
+        """Post every body and return each answer's data, asking again for the ones noon refuses.
+
+        noon refuses requests that come too fast (429, and 403 when it has been pushed harder), so a
+        refusal is not a failure: the store is read more slowly instead of less completely."""
+        results: list[dict] = [{}] * len(bodies)
+        pending = list(range(len(bodies)))
+        refusals = 0
+        for attempt in range(ATTEMPTS):
+            answers = self._post(url, [bodies[i] for i in pending])
+            refused = []
+            for i, answer in zip(pending, answers):
+                if int(answer.get("status") or 0) == 200:
+                    results[i] = ((answer.get("data") or {}).get("data") or {})
+                else:
+                    refused.append(i)
+            pending = refused
+            if not pending:
+                if refusals and not self._throttled:
+                    self._throttled = True   # it stays spent for the rest of the store; saying so once is enough
+                    self.log("  (noon's fast allowance is spent; the rest is read at the pace noon grants)")
+                return results
+            refusals += len(pending)
+            # The fast allowance is spent, so noon is granting only a couple a second now. Pause briefly and
+            # ask again for what it refused: a refusal returns at once and costs nothing, and keeping the
+            # requests in flight is what takes up the rate as noon frees it.
+            self._page.wait_for_timeout(PAUSE)
+        raise StoreError(f"noon kept refusing {len(pending)} request(s) even after slowing right down. "
+                         f"Try again in a few minutes; if it persists, use Load Stores to sign in again.")
+
+    def _body(self, query: CatalogQuery, page: Optional[int] = None) -> dict:
+        sort, direction = _sort(query)
+        body = dict(self._base_body)
+        body.update({"page": page or query.page, "per_page": self.page_size,
+                     "filters": _filters(self._base_filters, query.category),
+                     "sort": sort, "direction": direction})
+        return body
+
+    def _post(self, url: str, bodies: list[dict]) -> list[dict]:
+        if not bodies:
+            return []
+        try:
+            return self._page.evaluate(_POST_JS, {
+                "url": url, "bodies": bodies, "headers": self._headers,
+                "concurrency": self._concurrency, "timeout": REQUEST_TIMEOUT * 1000, "gap": self._gap})
+        except Exception as e:
+            raise StoreError(f"The Seller Center page stopped answering ({_first_line(e)}). Try again.") from e
+
+    def _open_catalog(self) -> None:
+        """Open the account's catalog and capture the context its own requests carry."""
+        captured: dict = {}
+
+        def on_request(request):
+            if ENDPOINT in request.url and request.method == "POST" and "headers" not in captured:
+                import json
+                captured["headers"] = {k: v for k, v in request.headers.items() if SEND_HEADERS.match(k.lower())}
+                try:
+                    captured["body"] = json.loads(request.post_data or "{}")
+                except Exception:
+                    captured["body"] = {}
+
+        self._page.on("request", on_request)
+        url = (f"{HOST}/en/catalog?project={_project(self.store)}"
+               f"&tab=noon&live_status=true&page=1&limit={self.page_size}")
+        def load():
+            """Open the catalog and wait for the app to ask for its first page of offers."""
+            try:
+                self._page.goto(url, wait_until="domcontentloaded", timeout=90_000)
+            except Exception:
+                pass   # a slow load still fires the request the context comes from
+            deadline = self._page.evaluate("Date.now()") + READY_TIMEOUT * 1000
+            while "headers" not in captured and self._page.evaluate("Date.now()") < deadline:
+                self._page.wait_for_timeout(500)
+
+        load()
+        if "login" in self._page.url:
+            raise StoreError("The noon Seller Center session has expired. Use Load Stores to sign in again.")
+        if "headers" not in captured:
+            # The catalog is a single-page app and now and then it just doesn't start -- seen on the first
+            # fetch after another browser had only moments earlier let go of the profile. A second load costs
+            # seconds; giving up throws away the whole store for a slow boot.
+            load()
+        if "headers" not in captured:
+            raise StoreError("Seller Center didn't load its catalog, so the store couldn't be read.")
+
+        self._headers = captured["headers"]
+        self._base_body = dict(captured["body"])
+        self._base_body["noon_store_code"] = _store_code(self.store)   # the store asked for, not the page's own
+        self._base_filters = dict(self._base_body.get("filters") or {})
+
+    def _name_of_store(self) -> str:
+        """The account's own name for this store, used for the listing's file name."""
+        code = _store_code(self.store)
+        try:
+            response = self._context.request.get(
+                STORES_API, headers={**self._headers, "x-project": _project(self.store)}, timeout=60_000)
+            if response.status != 200:
+                return self.store.path
+            for raw in (response.json() or {}).get("noon_stores") or []:
+                if raw.get("noon_store_code") == code:
+                    return ((raw.get("name_locale") or {}).get("name_en") or "").strip() or self.store.path
+        except Exception:
+            pass
+        return self.store.path
+
+
+def _first_line(error: Exception) -> str:
+    return (str(error).strip().splitlines() or [type(error).__name__])[0]

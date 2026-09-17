@@ -15,11 +15,14 @@ from playwright.sync_api import sync_playwright
 
 from ..domain import CatalogPage, CatalogQuery, StoreError, StoreRef
 from .page_data import PageDataError, read_page
+from .window import hide_window
 
 BROWSERS = (("chrome", "Google Chrome"), ("msedge", "Microsoft Edge"))
 BROWSER_ARGS = [
     "--disable-blink-features=AutomationControlled",
-    "--window-position=-32000,-32000",  # off-screen: noon rejects headless browsers, but nobody needs to see it
+    # noon rejects headless browsers, so the window is hidden instead of done without: off the edge of the
+    # screen on Windows and Linux, and minimised on macOS, which ignores this flag (see window.hide_window)
+    "--window-position=-32000,-32000",
     "--window-size=1280,900",
     "--blink-settings=imagesEnabled=false",  # nothing looks at the page, so its images needn't load
     # Chrome slows the timers and work of windows nobody sees, which would stall the off-screen page
@@ -151,12 +154,7 @@ class NoonBrowserCatalog:
 
     def _minimize(self):
         """Minimize the window: macOS moves windows placed off-screen back into view."""
-        try:
-            cdp = self._page.context.new_cdp_session(self._page)
-            window = cdp.send("Browser.getWindowForTarget")["windowId"]
-            cdp.send("Browser.setWindowBounds", {"windowId": window, "bounds": {"windowState": "minimized"}})
-        except Exception:
-            pass  # a visible window still works
+        hide_window(self._page)
 
     def _open_store(self):
         """Open the store and wait until noon's bot check, which runs in the page, lets the store's pages through.

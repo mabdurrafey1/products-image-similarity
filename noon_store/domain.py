@@ -54,6 +54,7 @@ class Product:
     price: float | None
     link: str
     image_urls: tuple[str, ...] = ()
+    psku: str = ""      # the seller's own SKU; only the account that owns the store knows it
     added_on: str = ""  # YYYY-MM-DD the product first appeared in the listing
 
 

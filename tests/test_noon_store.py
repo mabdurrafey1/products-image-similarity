@@ -31,7 +31,7 @@ FEB = datetime(2026, 2, 5, 9, 0)
 def product(n, price=10.0):
     return Product(sku=f"SKU{n}", title=f"Product {n}", brand="Brand", price=price,
                    link=f"https://www.noon.com/uae-en/product-{n}/SKU{n}/p/",
-                   image_urls=(f"https://img.test/{n}a.jpg", f"https://img.test/{n}b.jpg"))
+                   image_urls=(f"https://img.test/{n}a.jpg", f"https://img.test/{n}b.jpg"), psku=f"P{n}")
 
 
 def category_tree(paths):
@@ -304,8 +304,10 @@ class ExcelListingRepositoryTests(unittest.TestCase):
                              (store, "Test: Store", JAN, JAN))
 
             first_sheet = pd.read_excel(location)  # what the search pipeline and report read
-            for column in ("sku", "Product Title", "Main Image URL", "Product Link", "Combined_All_Image_URLs", "Price"):
+            for column in ("sku", "PartnerSKU", "Product Title", "Main Image URL", "Product Link",
+                           "Combined_All_Image_URLs", "Price"):
                 self.assertIn(column, first_sheet.columns)
+            self.assertEqual(first_sheet.loc[0, "PartnerSKU"], "P1")  # the search pipeline reads it as psku
             self.assertEqual(first_sheet.loc[0, "Combined_All_Image_URLs"], "https://img.test/1a.jpg;https://img.test/1b.jpg")
 
     def test_plain_excel_file_is_not_a_listing(self):

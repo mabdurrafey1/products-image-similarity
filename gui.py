@@ -3,12 +3,15 @@ import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import threading
+import time
 import webbrowser
+
+from app_icon import set_app_icon
 import match_image_ai
 import generate_report
 import noon_store
 
-# Store links offered in the store box before any has been typed
+# Offered in the store box until the account's own stores have been read (Load Stores)
 DEFAULT_STORE_LINKS = [
     "https://www.noon.com/uae-en/p-19740/",  # TIGER
     "https://www.noon.com/uae-en/p-27379/",  # JAJEEK
@@ -48,6 +51,19 @@ def save_config(config_data):
             json.dump(config_data, f, indent=4)
     except Exception:
         pass
+
+def _label_for_link(url):
+    match = re.search(r"/(p-\d+)", url or "")
+    return match.group(1) if match else url
+
+
+def _saved_store_choices():
+    """The account's stores as {label: link}, as last read; the known stores until then."""
+    saved = load_config().get("noon_stores") or []
+    choices = {entry["label"]: entry["url"] for entry in saved
+               if entry.get("label") and entry.get("url")}
+    return choices or {_label_for_link(link): link for link in DEFAULT_STORE_LINKS}
+
 
 def get_default_global_image_dir():
     import platform
@@ -219,9 +235,11 @@ class SearchTab(ttk.Frame):
         self.title_text = tk.Text(form_card, height=3, width=40, font=("Segoe UI", 10))
         self.title_text.grid(row=1, column=1, columnspan=2, padx=10, pady=10, sticky="we")
         
-        # 3. Input Source Row (multi-select)
-        source_label = ttk.Label(form_card, text="Input Source(s):")
-        source_label.grid(row=2, column=0, sticky="nw", padx=10, pady=10)
+        # 3. Input Source Row (multi-select), folded away when the log and results want the room
+        self.sources_open = True
+        self.sources_toggle = ttk.Button(form_card, text="▼ Input Source(s):", width=18,
+                                         command=self.toggle_sources)
+        self.sources_toggle.grid(row=2, column=0, sticky="nw", padx=10, pady=10)
 
         import glob
         excel_files = sorted(glob.glob("input_data/*.xlsx"))
@@ -230,7 +248,11 @@ class SearchTab(ttk.Frame):
         source_container = ttk.Frame(form_card)
         source_container.grid(row=2, column=1, padx=10, pady=10, sticky="we")
 
-        source_list_frame = ttk.Frame(source_container)
+        # What the toggle folds away; the noon store row below it stays, being used constantly
+        self.sources_panel = ttk.Frame(source_container)
+        self.sources_panel.pack(fill="x", expand=True)
+
+        source_list_frame = ttk.Frame(self.sources_panel)
         source_list_frame.pack(fill="x", expand=True)
 
         self.source_listbox = tk.Listbox(source_list_frame, selectmode=tk.MULTIPLE, exportselection=False, height=4, font=("Segoe UI", 9))
@@ -242,21 +264,37 @@ class SearchTab(ttk.Frame):
 
         self._populate_source_listbox()
 
-        source_hint = ttk.Label(source_container, text="Click a file to select/deselect it — multiple files allowed", font=("Segoe UI", 8, "italic"))
-        source_hint.pack(anchor="w", pady=(2, 0))
+        hint_row = ttk.Frame(self.sources_panel)
+        hint_row.pack(fill="x", pady=(2, 0))
+
+        source_hint = ttk.Label(hint_row, text="Click a file to select/deselect it — multiple files allowed", font=("Segoe UI", 8, "italic"))
+        source_hint.pack(side="left")
+
+        # Re-read input_data, for files added or fetched outside this window
+        self.refresh_files_btn = ttk.Button(hint_row, text="Refresh Files", command=self.refresh_excel_list)
+        self.refresh_files_btn.pack(side="right")
 
         # Fetch a public noon store into input_data, or add the new arrivals of fetched stores
-        store_row = ttk.Frame(source_container)
+        store_row = self._store_row = ttk.Frame(source_container)
         store_row.pack(fill="x", pady=(8, 0))
 
-        store_lbl = ttk.Label(store_row, text="Noon store link:")
+        store_lbl = ttk.Label(store_row, text="Noon store:")
         store_lbl.pack(side="left", padx=(0, 5))
 
-        saved_url = load_config().get("noon_store_url", "")
-        store_links = DEFAULT_STORE_LINKS + ([saved_url] if saved_url and saved_url not in DEFAULT_STORE_LINKS else [])
-        self.store_url_var = tk.StringVar(value=saved_url or DEFAULT_STORE_LINKS[0])
-        store_entry = ttk.Combobox(store_row, textvariable=self.store_url_var, values=store_links)
-        store_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        # The stores come from the signed-in Seller Center account, not from a pasted link
+        self.store_choices = _saved_store_choices()
+        self.store_url_var = tk.StringVar()
+        self.store_box = ttk.Combobox(store_row, textvariable=self.store_url_var,
+                                      values=list(self.store_choices), state="readonly")
+        self.store_box.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self._select_store(load_config().get("noon_store_url", ""))
+
+        self.load_stores_btn = ttk.Button(store_row, text="Load Stores", command=self.start_load_stores)
+        self.load_stores_btn.pack(side="left", padx=(0, 5))
+
+        # Each account signs into a Chrome profile of its own; the dialog adds, re-signs and removes them
+        self.accounts_btn = ttk.Button(store_row, text="Accounts", command=self.open_accounts)
+        self.accounts_btn.pack(side="left", padx=(0, 5))
 
         self.fetch_store_btn = ttk.Button(store_row, text="Fetch Store", command=self.start_fetch_store)
         self.fetch_store_btn.pack(side="left")
@@ -394,8 +432,20 @@ class SearchTab(ttk.Frame):
         self.status_lbl = ttk.Label(self.progress_frame, textvariable=self.status_var, font=("Segoe UI", 9, "italic"))
         self.status_lbl.pack(anchor="w", pady=2)
         
-        self.progress = ttk.Progressbar(self.progress_frame, mode="indeterminate")
-        self.progress.pack(fill="x", pady=2)
+        # The bar says something is happening; the clock beside it says for how long
+        progress_row = ttk.Frame(self.progress_frame)
+        progress_row.pack(fill="x", pady=2)
+
+        self.progress = ttk.Progressbar(progress_row, mode="indeterminate")
+        self.progress.pack(side="left", fill="x", expand=True)
+
+        self.elapsed_var = tk.StringVar(value="")
+        self.elapsed_lbl = ttk.Label(progress_row, textvariable=self.elapsed_var,
+                                     font=("Segoe UI", 9), width=12, anchor="e")
+        self.elapsed_lbl.pack(side="right", padx=(8, 0))
+
+        self._clock_job = None      # the repeating tick, while something is running
+        self._started_at = None
         
         # Action Buttons
         btn_frame = ttk.Frame(main_frame)
@@ -596,6 +646,7 @@ class SearchTab(ttk.Frame):
         self.run_btn.config(state="disabled")
         self.stop_btn.config(state="normal")
         self.progress.start(10)
+        self._start_clock()
         self.status_var.set("Initializing AI search model & calculating embeddings...")
         self.log_text.delete("1.0", tk.END)
         self.append_log(f"Starting AI Product Duplicate Finder (Tab #{self.tab_id})...\n")
@@ -605,6 +656,36 @@ class SearchTab(ttk.Frame):
         thread.daemon = True
         thread.start()
 
+
+    def toggle_sources(self):
+        """Fold the input source list away, and unfold it again."""
+        self.sources_open = not self.sources_open
+        if self.sources_open:
+            self.sources_panel.pack(fill="x", expand=True, before=self._store_row)
+        else:
+            self.sources_panel.pack_forget()
+        self.sources_toggle.config(text=("▼ " if self.sources_open else "▶ ") + "Input Source(s):")
+
+    def _start_clock(self):
+        """Count the time this run is taking, beside the progress bar."""
+        self._stop_clock(clear=False)   # never leave two ticks running
+        self._started_at = time.time()
+        self._tick()
+
+    def _tick(self):
+        if self._started_at is None:
+            return
+        spent = int(time.time() - self._started_at)
+        self.elapsed_var.set(f"{spent // 60:d}:{spent % 60:02d} elapsed")
+        self._clock_job = self.main_app.root.after(1000, self._tick)
+
+    def _stop_clock(self, clear=True):
+        """Stop counting, leaving the time the finished run took on screen."""
+        if self._clock_job is not None:
+            self.main_app.root.after_cancel(self._clock_job)
+            self._clock_job = None
+        if clear:
+            self._started_at = None
 
     def append_log(self, text):
         self.log_text.insert(tk.END, text)
@@ -696,6 +777,7 @@ class SearchTab(ttk.Frame):
 
     def on_search_success(self):
         self.progress.stop()
+        self._stop_clock()
         self.run_btn.config(state="normal")
         self.stop_btn.config(state="disabled")
         self.status_var.set(f"Search complete! Matches saved to {self.last_report_path}")
@@ -707,6 +789,7 @@ class SearchTab(ttk.Frame):
 
     def on_search_error(self, error_msg):
         self.progress.stop()
+        self._stop_clock()
         self.run_btn.config(state="normal")
         self.stop_btn.config(state="disabled")
         
@@ -723,9 +806,9 @@ class SearchTab(ttk.Frame):
     def start_fetch_store(self):
         if self.is_running:
             return
-        url = self.store_url_var.get().strip()
+        url = self.selected_store_link()
         if not url:
-            messagebox.showerror("Error", "Paste the link of a noon store page first.")
+            messagebox.showerror("Error", "Pick a store first, or use Load Stores to read them from your noon account.")
             return
         try:
             existing = noon_store.find_listing(url, "input_data")
@@ -740,6 +823,236 @@ class SearchTab(ttk.Frame):
         config["noon_store_url"] = url
         save_config(config)
         self._start_store_task("Opening the noon store...", self._fetch_store, url)
+
+    def _store_log(self, message):
+        """Say it in the execution log, where it stays, as well as on the status line, where it doesn't."""
+        self.append_log(f"{message}\n")
+        self.status_var.set(message)
+
+    def _log_from_worker(self, message):
+        """The same, from the thread doing the reading -- tkinter is only ever touched on its own thread."""
+        self.main_app.root.after(0, self._store_log, message)
+
+    def _log_accounts(self):
+        """Write out every noon account with the stores it holds, so the log says where each came from."""
+        import noon_seller_stores          # imported here: the GUI starts without playwright
+
+        views, orphans = noon_seller_stores.account_overview(self.store_choices)
+        self.append_log(f"\nnoon accounts ({len(views)}):\n")
+        for view in views:
+            self.append_log(f"  {view.title} [{view.status}]\n")
+            for label, link in view.stores:
+                self.append_log(f"      {label}  {link}\n")
+            if not view.stores:
+                self.append_log("      (no stores read from it yet -- Load Stores reads them)\n")
+        for label in orphans:
+            # Saved with a store box from an account since removed: nothing here can fetch these
+            self.append_log(f"  (belongs to no account here, cannot be fetched) {label}\n")
+        self.append_log("\n")
+
+    def _select_store(self, url):
+        """Show the store with this link, or the first one the account offers."""
+        for label, link in self.store_choices.items():
+            if link == url:
+                self.store_url_var.set(label)
+                return
+        self.store_url_var.set(next(iter(self.store_choices), ""))
+
+    def selected_store_link(self):
+        return self.store_choices.get(self.store_url_var.get().strip(), "")
+
+    def start_load_stores(self):
+        """Read the stores of the signed-in noon Seller Center account into the store box."""
+        if self.is_running:
+            return
+        self.load_stores_btn.config(state="disabled")
+        self._store_log("Reading the stores of your noon accounts...")
+        threading.Thread(target=self._load_stores, daemon=True).start()
+
+    def _load_stores(self):
+        import noon_seller_stores          # imported here: the GUI starts without playwright
+        try:
+            stores = noon_seller_stores.fetch_stores(log=self._log_from_worker)
+            choices, error = {store.label: store.url for store in stores}, ""
+        except Exception as e:
+            choices, error = {}, str(e)
+        self.main_app.root.after(0, self._stores_loaded, choices, error)
+
+    def _stores_loaded(self, choices, error):
+        self.load_stores_btn.config(state="normal")
+        if error:
+            self._store_log(f"[ERROR] The stores couldn't be read: {error}")
+            messagebox.showerror("Load Stores", error)
+            return
+        chosen = self.selected_store_link()
+        self.store_choices = choices
+        self.store_box.config(values=list(choices))
+        self._select_store(chosen)
+        config = load_config()
+        config["noon_stores"] = [{"label": label, "url": link} for label, link in choices.items()]
+        save_config(config)
+        self._store_log(f"{len(choices)} stores read from your noon accounts.")
+        self._log_accounts()
+
+    def start_add_account(self):
+        """Sign into one more noon account, and add the stores it brings to the box."""
+        if self.is_running:
+            return
+        if not messagebox.askokcancel(
+                "Add Account",
+                "A Chrome window will open for the new account.\n\n"
+                "Sign in there with the noon account you want to add — signing in with an account "
+                "that is already on the list changes nothing.\n\n"
+                "Its stores join the list as soon as you are in."):
+            return
+        self.accounts_btn.config(state="disabled")
+        self.load_stores_btn.config(state="disabled")
+        self._store_log("Opening a window to sign into the new noon account...")
+        threading.Thread(target=self._add_account, daemon=True).start()
+
+    def _add_account(self):
+        import noon_seller_stores          # imported here: the GUI starts without playwright
+        try:
+            stores = noon_seller_stores.add_account(log=self._log_from_worker)
+            added, error = {store.label: store.url for store in stores}, ""
+        except Exception as e:
+            added, error = {}, str(e)
+        self.main_app.root.after(0, self._account_added, added, error)
+
+    def _account_added(self, added, error):
+        self.accounts_btn.config(state="normal")
+        self.load_stores_btn.config(state="normal")
+        if error:
+            self._store_log(f"[ERROR] The account wasn't added: {error}")
+            messagebox.showerror("Add Account", error)
+            return
+        chosen = self.selected_store_link()
+        # The box offers stores, not accounts: the new account's join the ones already there, by name
+        self.store_choices = dict(sorted({**self.store_choices, **added}.items(),
+                                         key=lambda choice: choice[0].lower()))
+        self.store_box.config(values=list(self.store_choices))
+        self._select_store(chosen)
+        config = load_config()
+        config["noon_stores"] = [{"label": label, "url": link}
+                                 for label, link in self.store_choices.items()]
+        save_config(config)
+        self._store_log(f"Account added: {len(added)} more stores to choose from.")
+        self._log_accounts()
+
+    def open_accounts(self):
+        """Show the noon accounts: what each holds, and how to add, re-sign or remove one."""
+        if self.is_running:
+            return
+        if getattr(self, "_accounts_window", None) is not None:
+            self._accounts_window.lift()
+            return
+        window = tk.Toplevel(self.main_app.root)
+        self._accounts_window = window
+        window.title("noon Accounts")
+        window.transient(self.main_app.root)
+        window.resizable(False, False)
+        window.protocol("WM_DELETE_WINDOW", self._close_accounts)
+
+        self._accounts_body = ttk.Frame(window, padding=12)
+        self._accounts_body.pack(fill="both", expand=True)
+        self._fill_accounts()
+
+        # Centred on the main window, a little above the middle, where a dialog is looked for
+        window.update_idletasks()
+        root = self.main_app.root
+        x = root.winfo_x() + (root.winfo_width() - window.winfo_width()) // 2
+        y = root.winfo_y() + (root.winfo_height() - window.winfo_height()) // 3
+        window.geometry(f"+{max(0, x)}+{max(0, y)}")
+        window.grab_set()
+
+    def _close_accounts(self):
+        window, self._accounts_window = getattr(self, "_accounts_window", None), None
+        if window is not None:
+            window.grab_release()
+            window.destroy()
+
+    def _fill_accounts(self):
+        """Draw a row per account. Drawn again after a removal, so the list stays true."""
+        import noon_seller_stores          # imported here: the GUI starts without playwright
+
+        for child in self._accounts_body.winfo_children():
+            child.destroy()
+        views, orphans = noon_seller_stores.account_overview(self.store_choices)
+
+        ttk.Label(self._accounts_body, font=("Segoe UI", 9, "italic"),
+                  text="Each account signs into a Chrome window of its own. "
+                       "Removing one deletes its sign-in from this computer.").pack(anchor="w", pady=(0, 10))
+
+        if not views:
+            ttk.Label(self._accounts_body, text="No noon account yet — Add Account opens a window "
+                                                "to sign into one.").pack(anchor="w")
+
+        for view in views:
+            row = ttk.Frame(self._accounts_body)
+            row.pack(fill="x", pady=3)
+            ttk.Label(row, text=view.title, width=42, anchor="w").pack(side="left")
+            ttk.Label(row, text=view.status, width=14, anchor="w",
+                      font=("Segoe UI", 9)).pack(side="left")
+            ttk.Button(row, text="Remove", width=9,
+                       command=lambda v=view: self._remove_account(v)).pack(side="right", padx=(5, 0))
+            ttk.Button(row, text="Sign in again", width=13,
+                       command=lambda v=view: self._sign_in_again(v)).pack(side="right")
+
+        if orphans:
+            # Saved with a store box from an account since removed: nothing can fetch these
+            ttk.Label(self._accounts_body, font=("Segoe UI", 8), foreground="#b06000", wraplength=560,
+                      text=f"{len(orphans)} store(s) belong to no account here and cannot be fetched: "
+                           f"{', '.join(orphans)}").pack(anchor="w", pady=(10, 0))
+
+        footer = ttk.Frame(self._accounts_body)
+        footer.pack(fill="x", pady=(14, 0))
+        ttk.Button(footer, text="Add Account", command=self._add_from_dialog).pack(side="left")
+        ttk.Button(footer, text="Close", command=self._close_accounts).pack(side="right")
+
+    def _add_from_dialog(self):
+        """The sign-in takes minutes and runs against the main window, so the dialog steps aside."""
+        self._close_accounts()
+        self.start_add_account()
+
+    def _sign_in_again(self, view):
+        self._close_accounts()
+        self.accounts_btn.config(state="disabled")
+        self.load_stores_btn.config(state="disabled")
+        self._store_log(f"Opening a window to sign into {view.title}...")
+        threading.Thread(target=self._do_sign_in, args=(view.profile,), daemon=True).start()
+
+    def _do_sign_in(self, profile):
+        import noon_seller_stores
+
+        try:
+            stores = noon_seller_stores.sign_in_account(profile, log=self._log_from_worker)
+            added, error = {store.label: store.url for store in stores}, ""
+        except Exception as e:
+            added, error = {}, str(e)
+        self.main_app.root.after(0, self._account_added, added, error)
+
+    def _remove_account(self, view):
+        import noon_seller_stores
+
+        held = ", ".join(label for label, _ in view.stores) or "no stores yet"
+        if not messagebox.askokcancel(
+                "Remove Account",
+                f"Remove {view.title}?\n\nIts saved sign-in is deleted from this computer and its "
+                f"stores ({held}) come off the list.\n\nThis cannot be undone — getting the account "
+                f"back means signing into it again.", parent=self._accounts_window):
+            return
+        noon_seller_stores.remove_account(view.profile)
+        for label, _ in view.stores:
+            self.store_choices.pop(label, None)
+        self.store_box.config(values=list(self.store_choices))
+        self._select_store(self.selected_store_link())
+        config = load_config()
+        config["noon_stores"] = [{"label": label, "url": link}
+                                 for label, link in self.store_choices.items()]
+        save_config(config)
+        self._store_log(f"{view.title} removed, along with its sign-in and {len(view.stores)} stores.")
+        self._log_accounts()
+        self._fill_accounts()
 
     def start_refresh_listing(self):
         if self.is_running:
@@ -756,11 +1069,13 @@ class SearchTab(ttk.Frame):
         self.is_running = True
         self.stop_event = threading.Event()
         self.main_app.notebook.tab(self, text=f"Search Tab #{self.tab_id} ⏳")
-        for button in (self.run_btn, self.fetch_store_btn, self.refresh_btn):
+        for button in (self.run_btn, self.fetch_store_btn, self.refresh_btn, self.load_stores_btn,
+                       self.accounts_btn, self.refresh_files_btn):
             button.config(state="disabled")
         self.stop_btn.config(state="normal")
         self.progress.config(mode="indeterminate")
         self.progress.start(10)
+        self._start_clock()
         self.status_var.set(status)
         self.log_text.delete("1.0", tk.END)
         thread = threading.Thread(target=self._run_store_task, args=(task, argument))
@@ -812,8 +1127,10 @@ class SearchTab(ttk.Frame):
 
     def _on_store_task_done(self, outcome, message, paths):
         self.progress.stop()
+        self._stop_clock()
         self.progress.config(mode="indeterminate", maximum=100, value=0)  # searches report progress out of 100
-        for button in (self.run_btn, self.fetch_store_btn, self.refresh_btn):
+        for button in (self.run_btn, self.fetch_store_btn, self.refresh_btn, self.load_stores_btn,
+                       self.accounts_btn, self.refresh_files_btn):
             button.config(state="normal")
         self.stop_btn.config(state="disabled")
         self.main_app.notebook.tab(self, text=f"Search Tab #{self.tab_id}")
@@ -899,6 +1216,7 @@ class DuplicateFinderGUI:
 if __name__ == "__main__":
     # Apply standard native look and feel styling configurations
     root = tk.Tk()
+    set_app_icon(root)      # decoration only: a missing or unreadable icon changes nothing else
     style = ttk.Style(root)
     # Use native theme based on operating system
     if sys.platform.startswith("darwin"):

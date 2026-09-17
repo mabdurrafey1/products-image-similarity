@@ -23,6 +23,16 @@ def build():
         "--name=AI_Product_Duplicate_Finder",
         "gui.py"
     ]
+
+    # Both are optional: PyInstaller refuses to build at all if pointed at a file that isn't there
+    icon = os.path.join("assets", "app_icon.icns" if sys.platform == "darwin" else "app_icon.ico")
+    if os.path.exists(icon):
+        cmd.insert(-1, f"--icon={icon}")
+    else:
+        print(f"No {icon} found - building without an icon.")
+    if os.path.exists("assets"):
+        # The Dock tile is set at runtime from the PNG, so the PNG has to travel with the build
+        cmd.insert(-1, f"--add-data=assets{os.pathsep}assets")
     
     print(f"Running command: {' '.join(cmd)}")
     try:

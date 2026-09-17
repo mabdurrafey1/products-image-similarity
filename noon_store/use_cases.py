@@ -9,8 +9,11 @@ from typing import Callable, Iterable, Optional, Sequence
 from .domain import CatalogPage, CatalogQuery, Product, StopRequested, StoreError, StoreListing, StoreRef, subcategories
 from .ports import CatalogGateway, ListingRepository, OpenCatalog
 
-# Extra orderings that reach more products when one category at one price exceeds the per-query cap
-FALLBACK_SORTS = (("new_arrivals", "asc"), ("price", "asc"), ("price", "desc"))
+# Extra orderings that reach more products when one category at one price exceeds the per-query cap.
+# Cheapest-first and dearest-first come first because they are opposites: between them they reach everything
+# up to two capfuls, so nothing further is asked for.
+FALLBACK_SORTS = (("price", "asc"), ("price", "desc"), ("new_arrivals", "asc"))
+MIN_BATCH = 10  # pages to fetch at once when hunting the last few products
 
 
 @dataclass(frozen=True)
@@ -64,6 +67,9 @@ class _Crawler:
             for page in self.catalog.fetch_pages(batch):
                 self.keep(page)
                 pages.append(page)
+            if self.expected_total and len(batch) > 1:
+                self.log(f"  {len(self.found):,} of {self.expected_total:,} products "
+                         f"({self.requests} pages read)")
         return pages
 
     def keep(self, page: CatalogPage) -> None:
@@ -78,11 +84,27 @@ class _Crawler:
     def page_count(self, page: CatalogPage) -> int:
         return min(math.ceil(page.total / self.catalog.page_size), self.catalog.max_pages)
 
+    def by_orders(self, query: CatalogQuery, first: CatalogPage) -> bool:
+        """Read a store that is bigger than one query reaches, without narrowing it.
+
+        Cheapest-first and dearest-first each reach their own capful from opposite ends, so together they
+        cover anything up to two capfuls. That costs about one request per page of products, where narrowing
+        by category costs a first page per category on top. Returns whether everything was found."""
+        if first.total > 2 * self.cap:
+            return False  # too big for two orderings to meet in the middle; it has to be narrowed instead
+        self.log(f"  Reading all {first.total:,} products in price order "
+                 f"(~{math.ceil(first.total / self.catalog.page_size)} pages)...")
+        self.budget = None  # bounded by the orderings and the cap, not by the store's total
+        self.sweep(query)
+        return bool(self.expected_total) and len(self.found) >= self.expected_total
+
     def crawl(self, query: CatalogQuery, first: CatalogPage) -> None:
         """Keep every product matching `query`, whose first page is `first`.
 
         While a query matches more products than the cap it is split, by price and then by category. Each round
         fetches in one go the first pages of the new parts and the remaining pages of the parts that fit."""
+        if first.total > self.cap and self.by_orders(query, first):
+            return  # read straight through; narrowing it would only cost more requests
         self.budget = self.requests + 3 * math.ceil(first.total / self.catalog.page_size) + 100
         level = [(query, first)]
         while level:
@@ -128,6 +150,30 @@ class _Crawler:
             pages += [replace(query, sort_by=sort_by, sort_dir=sort_dir, page=n)
                       for n in range(1, self.catalog.max_pages + 1)]
         return pages
+
+    def sweep(self, query: CatalogQuery) -> None:
+        """Reach products that narrowing never returned, by reading the store again in other orders.
+
+        A split can come up short: noon files some products under no category of the facet the store was
+        split by, so they sit in none of the parts. Reading the whole store in another order reaches them,
+        each order serving its own capful. Stops as soon as the store's own count is accounted for."""
+        if not self.expected_total or len(self.found) >= self.expected_total:
+            return
+        self.budget = None  # bounded by the orders and the cap, not by the store's total
+        size = max(1, self.catalog.batch_size)
+        for sort_by, sort_dir in FALLBACK_SORTS:
+            ordered = replace(query, sort_by=sort_by, sort_dir=sort_dir)
+            number = 1
+            while number <= self.catalog.max_pages:
+                missing = self.expected_total - len(self.found)
+                if missing <= 0:
+                    return
+                # Never ask for more pages than the missing products could fill, but keep batches worth
+                # fetching at once when only a handful are missing and they could be on any page
+                pages = max(MIN_BATCH, math.ceil(missing / self.catalog.page_size))
+                last = min(number + min(size, pages), self.catalog.max_pages + 1)
+                self.fetch([replace(ordered, page=n) for n in range(number, last)])
+                number = last
 
     def new_arrivals(self) -> None:
         """Keep products newer than the known ones, stopping at the first page with nothing new."""
@@ -189,6 +235,7 @@ class FetchStore(_StoreUseCase):
             self.log(f"'{name}' lists {first.total:,} products.")
             crawler.expected_total = first.total
             crawler.crawl(CatalogQuery(), first)
+            crawler.sweep(CatalogQuery())
 
         location = self.repository.find(store)
         listing = StoreListing.fetched(store, name, crawler.found, self.clock(), self._previous(location))

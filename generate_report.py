@@ -749,10 +749,12 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
         .new-rank-badge { color: #16a34a; background: #f0fdf4; padding: 1px 4px; border-radius: 2px; }
         .image-container { position: relative; }
         .badge-pair { display: flex; gap: 4px; }
-        .sku-container-row { display: flex; gap: 6px; margin-bottom: 8px; width: 100%; }
+        /* Stacked, not side by side: a real PSKU needs the card's full width to be readable */
+        .sku-container-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; width: 100%; }
         .sku-pill-half { flex: 1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 5px 6px; display: flex; align-items: center; justify-content: space-between; font-size: 0.7rem; cursor: pointer; transition: all 0.15s ease; min-width: 0; }
         .sku-label { font-weight: 700; color: #64748b; margin-right: 4px; }
         .sku-label.psku { color: #10b981; }
+        .sku-pill-half.missing { cursor: default; opacity: 0.6; }
         .sku-value { font-family: monospace; color: #334155; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-grow: 1; text-align: right; }
     </style>
 </head>
@@ -917,15 +919,19 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
         # hundreds of cards
         vs_attr = round(ai_score, 4) if ai_score is not None else 0
         tx_attr = round(text_sim, 4) if text_sim is not None else 0
-        second_id = psku if psku else zsku
-        second_label = 'PSKU' if psku else 'ZSKU'
-        second_class = ' psku' if psku else ''
+        # Every card shows its PSKU; the ones without one say so rather than falling back to another id
+        if psku:
+            psku_pill = (f"""<div class="sku-pill-half" onclick="copyTextDirect('{psku}')" title="Click to copy PSKU">"""
+                         f"""<span class="sku-label psku">PSKU:</span><span class="sku-value">{psku}</span></div>""")
+        else:
+            psku_pill = ("""<div class="sku-pill-half missing" title="This product has no PSKU">"""
+                         """<span class="sku-label psku">PSKU:</span><span class="sku-value">&mdash;</span></div>""")
         html_content += f"""<div class="match-card" data-sku="{sku}" data-zsku="{zsku}" data-psku="{psku}" data-rank="{rank}" data-vs="{vs_attr}" data-tx="{tx_attr}" data-source="{source_file}">
 <div class="card-select-row"><label><input type="checkbox" class="select-checkbox" data-sku="{sku}" data-zsku="{zsku}" data-psku="{psku}" onchange="updateSelection()"> Select</label><span class="rank-badge-container"><span>Orig: #{rank}</span><span class="new-rank-badge">New: #{rank}</span></span></div>
 <div class="image-container"><div class="verify-badge-overlay"><span class="verify-dot {url_ready_class}" title="URL Ready: {url_status}"></span><span class="verify-dot {image_ready_class}" title="Image Ready: {image_status}"></span></div><img id="mainImg_{sku}" src="{html_image_path}" alt="" onerror="imgFallback(this)"><div class="image-bottom-overlay"><span class="overlay-badge badge-price">{price_str}</span><div class="badge-pair"><span class="overlay-badge badge-vs" title="Visual Similarity Score">{ai_score_str}</span><span class="overlay-badge badge-tx" title="Text Similarity Score">{text_sim_str}</span></div></div></div>
-<div class="product-title">{title}</div><button type="button" class="title-toggle" onclick="toggleTitle(this)">Show more</button>
+<div class="product-title expanded">{title}</div><button type="button" class="title-toggle" onclick="toggleTitle(this)">Show less</button>
 <div class="tags-row">{tags_html}<span class="tag-pill">{img_count} imgs</span><span class="tag-pill tag-match">{match_badge_str}</span><span class="tag-pill tag-source" title="Source Excel file">{source_file}</span></div>
-<div class="sku-container-row"><div class="sku-pill-half" onclick="copyTextDirect('{sku}')" title="Click to copy SKU"><span class="sku-label">SKU:</span><span class="sku-value">{sku}</span></div><div class="sku-pill-half" onclick="copyTextDirect('{second_id}')" title="Click to copy {second_label}"><span class="sku-label{second_class}">{second_label}:</span><span class="sku-value">{second_id}</span></div></div>
+<div class="sku-container-row"><div class="sku-pill-half" onclick="copyTextDirect('{sku}')" title="Click to copy SKU"><span class="sku-label">SKU:</span><span class="sku-value">{sku}</span></div>{psku_pill}</div>
 <div class="thumbnails-row">{thumbnails_html}</div>
 <div class="actions-row"><button class="action-btn btn-view" onclick="viewImage('{html_image_path}')">View</button><a class="action-btn btn-open" href="{product_url}" target="_blank">Open</a><button class="action-btn btn-copy" onclick="copyTextDirect('{psku if psku else sku}')">Copy {'PSKU' if psku else 'SKU'}</button></div>
 </div>
@@ -998,12 +1004,12 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
         function updateTitleToggle(titleEl) {
             const btn = titleEl.nextElementSibling;
             if (!btn || !btn.classList.contains('title-toggle')) return;
-            if (titleEl.classList.contains('expanded')) {
-                btn.classList.add('visible');
-                return;
-            }
+            // Titles start expanded, so measure the clamped height to know whether there is anything to collapse
+            const expanded = titleEl.classList.contains('expanded');
+            if (expanded) titleEl.classList.remove('expanded');
             // Hidden (filtered-out) cards report 0 sizes; they get re-checked when shown
             const overflows = titleEl.scrollHeight > titleEl.clientHeight + 1;
+            if (expanded) titleEl.classList.add('expanded');
             btn.classList.toggle('visible', overflows);
         }
 

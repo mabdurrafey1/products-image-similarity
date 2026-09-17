@@ -15,9 +15,9 @@ PRODUCTS_SHEET = "Products"  # first sheet, which the search pipeline reads
 INFO_SHEET = "Store Info"
 TIME_FORMAT = "%Y-%m-%d %H:%M"
 # Column names the search pipeline and HTML report already understand
-SKU, TITLE, BRAND, PRICE = "sku", "Product Title", "Brand", "Price"
+SKU, PARTNER_SKU, TITLE, BRAND, PRICE = "sku", "PartnerSKU", "Product Title", "Brand", "Price"
 MAIN_IMAGE, LINK, ALL_IMAGES, ADDED_ON = "Main Image URL", "Product Link", "Combined_All_Image_URLs", "Added On"
-COLUMNS = [SKU, TITLE, BRAND, PRICE, MAIN_IMAGE, LINK, ALL_IMAGES, ADDED_ON]
+COLUMNS = [SKU, PARTNER_SKU, TITLE, BRAND, PRICE, MAIN_IMAGE, LINK, ALL_IMAGES, ADDED_ON]
 
 
 class ExcelListingRepository:
@@ -95,6 +95,7 @@ def _file_name(listing: StoreListing) -> str:
 def _products_frame(listing: StoreListing) -> pd.DataFrame:
     return pd.DataFrame([{
         SKU: p.sku,
+        PARTNER_SKU: p.psku,
         TITLE: p.title,
         BRAND: p.brand,
         PRICE: p.price,
@@ -120,6 +121,7 @@ def _to_product(row: dict) -> Product:
     price = row.get(PRICE, "")
     return Product(
         sku=row[SKU].strip(),
+        psku=row.get(PARTNER_SKU, "").strip(),   # blank in listings saved before it was carried through
         title=row.get(TITLE, ""),
         brand=row.get(BRAND, ""),
         price=float(price) if price else None,

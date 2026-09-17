@@ -10,7 +10,7 @@ This module wires the default adapters into the use cases for callers such as th
 import os
 
 from .adapters.excel_repository import ExcelListingRepository
-from .adapters.noon_browser import NoonBrowserCatalog
+from .adapters.noon_seller_api import NoonSellerApiCatalog
 from .domain import StopRequested, StoreError, StoreRef
 from .use_cases import FetchResult, FetchStore, RefreshResult, RefreshStore
 
@@ -19,7 +19,7 @@ __all__ = ["FetchResult", "RefreshResult", "StopRequested", "StoreError",
 
 
 def _catalog_opener(log):
-    return lambda store: NoonBrowserCatalog(store, log)
+    return lambda store: NoonSellerApiCatalog(store, log)
 
 
 def fetch_store(store_url, directory, log=print, on_progress=None, should_stop=None) -> FetchResult:

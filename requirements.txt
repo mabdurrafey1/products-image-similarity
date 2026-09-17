@@ -8,3 +8,4 @@ requests
 tqdm
 pyyaml
 playwright
+pyobjc-framework-Cocoa ; sys_platform == "darwin"   # the Dock icon; macOS only, ignored elsewhere
