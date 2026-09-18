@@ -11,12 +11,6 @@ import match_image_ai
 import generate_report
 import noon_store
 
-# Offered in the store box until the account's own stores have been read (Load Stores)
-DEFAULT_STORE_LINKS = [
-    "https://www.noon.com/uae-en/p-19740/",  # TIGER
-    "https://www.noon.com/uae-en/p-27379/",  # JAJEEK
-    "https://www.noon.com/uae-en/p-82799/",  # ELTRAZONE
-]
 from PIL import Image, ImageTk
 import re
 import json
@@ -52,17 +46,16 @@ def save_config(config_data):
     except Exception:
         pass
 
-def _label_for_link(url):
-    match = re.search(r"/(p-\d+)", url or "")
-    return match.group(1) if match else url
-
-
 def _saved_store_choices():
-    """The account's stores as {label: link}, as last read; the known stores until then."""
+    """The account's stores as {label: link}, as last read; none until Load Stores has read them.
+
+    No store is written into this source. An empty box is the honest answer before the accounts have
+    been read: a store offered without being read is a guess, and fetching one reads a catalog the
+    signed-in account may not even own.
+    """
     saved = load_config().get("noon_stores") or []
-    choices = {entry["label"]: entry["url"] for entry in saved
-               if entry.get("label") and entry.get("url")}
-    return choices or {_label_for_link(link): link for link in DEFAULT_STORE_LINKS}
+    return {entry["label"]: entry["url"] for entry in saved
+            if entry.get("label") and entry.get("url")}
 
 
 def get_default_global_image_dir():
