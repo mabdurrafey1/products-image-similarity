@@ -1061,7 +1061,9 @@ class SearchTab(ttk.Frame):
         fetch.pack(side="left", padx=(5, 0))
         refresh = ttk.Button(footer, text="↻ Refresh", command=self._refresh_from_dialog)
         refresh.pack(side="left", padx=(5, 0))
-        self._stores_widgets += [load, fetch, refresh]
+        images = ttk.Button(footer, text="⬇ Sync Images", command=self._sync_images_from_dialog)
+        images.pack(side="left", padx=(5, 0))
+        self._stores_widgets += [load, fetch, refresh, images]
         ttk.Button(footer, text="Close", command=self._close_stores).pack(side="right")
 
         # Drawn again whenever the stores change, which can happen while a task is still running:
@@ -1126,6 +1128,59 @@ class SearchTab(ttk.Frame):
             self._store_log(f"Not fetched yet, so nothing to refresh: {', '.join(never)}.")
         self._start_store_task(f"Checking {len(paths)} store(s) for new arrivals...",
                                self._refresh_listings, paths)
+
+    def _sync_images_from_dialog(self):
+        """Download whatever images the ticked stores' products are missing, and nothing else.
+
+        The tick is the choice here as it is for Fetch and Refresh. A store nobody has fetched has no
+        workbook to read the image links out of, so it is named rather than passed over in silence.
+        """
+        labels = self._ticked_stores()
+        if not labels:
+            messagebox.showinfo("Sync Images", "Tick the stores whose images to sync first.")
+            return
+        never = [label for label in labels if not self._has_listing(label)]
+        paths = [noon_store.find_listing(self.store_choices[label], "input_data")
+                 for label in labels if self._has_listing(label)]
+        if not paths:
+            messagebox.showinfo("Sync Images", "None of the ticked stores has been fetched yet, so "
+                                               "there are no products to sync images for. Use Fetch "
+                                               "Store first:\n\n" + "\n".join(never))
+            return
+        if never:
+            self._store_log(f"Not fetched yet, so no images to sync: {', '.join(never)}.")
+        self._start_store_task(f"Syncing images for {len(paths)} store(s)...",
+                               self._sync_images, paths)
+
+    def _sync_images(self, paths):
+        """Fetch the images the saved listings name but the images folder hasn't got.
+
+        Nothing already on disk is downloaded again -- this tops the folder up rather than refilling
+        it -- so running it twice over costs one pass of checking and no downloads. One store that
+        fails costs only itself, the same way fetching several does.
+        """
+        import downloader
+        image_dir = self.image_dir_var.get().strip() or get_default_global_image_dir()
+        done, failed = [], []
+        for number, path in enumerate(paths, start=1):
+            if self.stop_event.is_set():
+                raise noon_store.StopRequested()
+            name = os.path.basename(path)
+            print(f"Store {number} of {len(paths)}: {name}")
+            try:
+                df = match_image_ai.load_dataset(path)
+                downloader.download_missing_images(df, image_dir=image_dir,
+                                                   should_stop=self.stop_event.is_set)
+                done.append(path)
+            except Exception as error:
+                failed.append(f"{name}: {error}")
+                print(f"  couldn't sync {name}: {error}")
+        if self.stop_event.is_set():
+            raise noon_store.StopRequested()
+        message = f"Images synced for {len(done)} store listing(s) into {image_dir}."
+        if failed:
+            message += f" {len(failed)} could not be read: " + "; ".join(failed)
+        return message, done
 
     def open_accounts(self):
         """Show the noon accounts: what each holds, and how to add, re-sign or remove one."""

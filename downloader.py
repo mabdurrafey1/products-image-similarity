@@ -2,10 +2,14 @@ import os
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-def download_missing_images(df, image_dir="downloaded_images", max_workers=10):
+def download_missing_images(df, image_dir="downloaded_images", max_workers=10, should_stop=None):
     """
     Checks the loaded pandas DataFrame for product SKU and Image URL values,
     and concurrently downloads any images that are not cached locally.
+
+    `should_stop` is a callable asked between downloads whether to give up. A GUI tab passes its own
+    stop event's `is_set` here rather than raising the module-level `match_image_ai.stop_requested`,
+    which is process-wide: setting that to stop one tab's sync would abort every other tab's search.
     """
     if not os.path.exists(image_dir):
         os.makedirs(image_dir, exist_ok=True)
@@ -53,6 +57,8 @@ def download_missing_images(df, image_dir="downloaded_images", max_workers=10):
         def download_single(task):
             sku, url, dest = task
             try:
+                if should_stop is not None and should_stop():
+                    return None
                 try:
                     import match_image_ai
                     if getattr(match_image_ai, "stop_requested", False):
