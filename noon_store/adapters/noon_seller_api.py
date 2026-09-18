@@ -38,15 +38,15 @@ DEFAULT_PROFILE = "~/noon_seller_profile"
 # One Chrome profile directory per noon account, however many there are: a profile is one cookie jar, so
 # two accounts cannot share one. Signing into a new directory is the whole of adding an account.
 PROFILE_GLOB = "~/noon_seller_profile*"
-ACCOUNTS_FILE = "~/.noon_seller_accounts.json"   # which projects were found in which profile
-# noon has no endpoint that lists an account's projects -- every candidate 404s -- so a project is known
-# either because it was discovered in a session and written down, or because it is written down here.
-SEED = {DEFAULT_PROFILE: ("PRJ19740", "PRJ27379", "PRJ82799")}
+ACCOUNTS_FILE = "~/.noon_seller_accounts.json"   # which projects each profile held when it was last read
 HOST = "https://noon-catalog.noon.partners"
 BASE = HOST + "/_vs/mp/mp-noon-catalog-api-rocket/"
 LIST_API = BASE + "offer/list/noon"
 FACETS_API = BASE + "offer/facets/noon"
 STORES_API = HOST + "/_vs/mp/mp-noon-merchant-api/noon-store/list"
+# Seller Center's own project directory, the call its toolbar makes to draw the project picker: posted
+# with no payload and no project scope, it answers with every project the signed-in account holds.
+PROJECTS_API = "https://toolbar.noon.partners/_svc/mp-partner-platform/project/list"
 ENDPOINT = "offer/list/noon"      # the request whose headers and body carry the app's context
 CDN = "https://f.nooncdn.com/p/"
 
@@ -124,19 +124,33 @@ def _remembered(path: str) -> dict:
             found = json.load(handle)
     except (OSError, ValueError):
         return {}
-    return found if isinstance(found, dict) else {}
+    if not isinstance(found, dict):
+        return {}
+    # One spelling per profile, whatever spelling it was written down in: a file written on Windows
+    # keys its profiles the way that run happened to spell them.
+    return {_canonical(profile): projects for profile, projects in found.items()}
 
 
-def load_accounts(path: str = ACCOUNTS_FILE, pattern: str = PROFILE_GLOB,
-                  seed: Mapping[str, Sequence[str]] = SEED) -> tuple[Account, ...]:
+def _canonical(path: str, paths=os.path) -> str:
+    """One spelling of a profile directory, so one account is never taken for two.
+
+    Windows is why. There, expanduser substitutes the home directory but leaves the caller's forward
+    slash alone, while glob rebuilds what it finds with backslashes; keyed on the raw strings the two
+    spellings never match, and every account then starts out holding no projects at all.
+    """
+    return paths.normpath(paths.expanduser(path))
+
+
+def load_accounts(path: str = ACCOUNTS_FILE, pattern: str = PROFILE_GLOB) -> tuple[Account, ...]:
     """Every account somebody has signed into, in directory order.
 
-    An account with no projects yet is still an account: its own session is what names its project.
+    No account is written into the source. An account with no projects yet is still an account: what it
+    holds is asked of noon the next time it is read, and written down only so a fetch between reads
+    knows which profile owns a store.
     """
-    known = {os.path.expanduser(profile): tuple(projects) for profile, projects in seed.items()}
-    known.update({os.path.expanduser(profile): tuple(projects)
-                  for profile, projects in _remembered(path).items()})
-    return tuple(Account(profile=directory, projects=known.get(directory, ()))
+    known = {_canonical(profile): tuple(projects)
+             for profile, projects in _remembered(path).items()}
+    return tuple(Account(profile=directory, projects=known.get(_canonical(directory), ()))
                  for directory in sorted(glob.glob(os.path.expanduser(pattern)))
                  if os.path.isdir(directory))
 
@@ -144,7 +158,7 @@ def load_accounts(path: str = ACCOUNTS_FILE, pattern: str = PROFILE_GLOB,
 def remember_projects(profile: str, projects: Sequence[str], path: str = ACCOUNTS_FILE) -> None:
     """Write down which projects a profile holds, so a later fetch knows which account owns a store."""
     found = _remembered(path)
-    found[os.path.expanduser(profile)] = list(projects)
+    found[_canonical(profile)] = list(projects)
     with open(os.path.expanduser(path), "w") as handle:
         json.dump(found, handle, indent=2)
 
@@ -156,7 +170,7 @@ def forget_profile(profile: str, path: str = ACCOUNTS_FILE) -> None:
     of theirs would then be fetched through somebody else's session.
     """
     found = _remembered(path)
-    if found.pop(os.path.expanduser(profile), None) is None:
+    if found.pop(_canonical(profile), None) is None:
         return
     with open(os.path.expanduser(path), "w") as handle:
         json.dump(found, handle, indent=2)
@@ -180,6 +194,39 @@ def landed_project(headers: Mapping[str, str]) -> str:
         if name.lower() == "x-project":
             return value
     return ""
+
+
+def account_projects(ask: Callable[[], object]) -> tuple[str, ...]:
+    """Every project the signed-in account holds, as noon itself lists them.
+
+    Only the code field is read. Project names are free text, and a real account holds one named after
+    another project's code and one named after an email address -- so matching codes out of the text
+    would attach a store to the wrong account and read its catalog through somebody else's session.
+    """
+    answer = ask() or {}
+    listed = answer.get("projects") if isinstance(answer, Mapping) else None
+    return tuple(str(project["projectCode"]) for project in (listed or [])
+                 if isinstance(project, Mapping) and project.get("projectCode"))
+
+
+def projects_held(account: Account, ask: Callable[[], object], headers: Mapping[str, str],
+                  remember: Callable[[str, Sequence[str]], None] = remember_projects) -> tuple[str, ...]:
+    """Which projects an account reads, and writing them down for the fetches that follow.
+
+    noon's own listing is the answer, asked afresh every time: what was written down last time can only
+    be out of date, and an account that gained a project would otherwise never be seen to hold it. The
+    project the catalog landed on is the fallback, for the account whose listing is unavailable -- it
+    yields the one project already known to work rather than nothing at all.
+    """
+    try:
+        listed = account_projects(ask)
+    except Exception:
+        listed = ()                      # an account that won't list is not an account without projects
+    landed = landed_project(headers)
+    projects = listed or ((landed,) if landed else ())
+    if projects:
+        remember(account.profile, projects)
+    return projects
 
 
 def _store_code(store: StoreRef) -> str:

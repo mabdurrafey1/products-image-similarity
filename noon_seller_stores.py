@@ -12,10 +12,11 @@ adding an account -- which is all Add Account does. Nothing here reads, stores o
 its own profile, and the headers the app sends are captured in memory for the length of one call only
 -- never printed, logged or written to disk.
 
-noon has no endpoint that lists an account's projects, so a project is known one of two ways: it was
-written down before, or the account's own session named it. A profile with nothing written down is
-opened bare; Seller Center lands on a project belonging to that account, the catalog names it in the
-requests it makes, and it is written down for next time.
+No store or project is written into this source. Each account is asked what it holds, every time it is
+read: Seller Center's own toolbar lists an account's projects at `project/list`, posted with no project
+scope, and that listing is the only source of truth. It is written down afterwards so a later fetch of
+one store knows which profile to open without a browser; an account whose listing is unavailable falls
+back to the project its catalog landed on, which is the one project already known to work.
 """
 from __future__ import annotations
 
@@ -28,9 +29,9 @@ from typing import Callable, Iterable, Mapping, Optional, Sequence
 
 # One definition of the accounts, of what each holds, and of "a window nobody has to see".
 from noon_store.adapters.window import hide_window
-from noon_store.adapters.noon_seller_api import (ACCOUNTS_FILE, OFFSCREEN, PROFILE_GLOB, Account,
-                                                 forget_profile, landed_project, load_accounts,
-                                                 remember_projects)
+from noon_store.adapters.noon_seller_api import (ACCOUNTS_FILE, OFFSCREEN, PROFILE_GLOB, PROJECTS_API,
+                                                 Account, _canonical, forget_profile, load_accounts,
+                                                 projects_held)
 
 COUNTRY = os.environ.get("NOON_COUNTRY", "AE")   # the accounts trade in the UAE only
 
@@ -191,18 +192,20 @@ def _account_stores(playwright, account: Account, country: str,
             raise SellerSessionError(
                 f"Seller Center didn't load its catalog for {account.label}, so its stores were skipped.")
 
-        projects = account.projects
-        if not projects:
-            # The account has just named itself. Writing it down is what lets a later fetch of one of
-            # its stores know which profile to open, without a browser and without asking.
-            discovered = landed_project(captured["headers"])
-            if not discovered:
-                raise SellerSessionError(f"{account.label} didn't say which project it holds.")
-            projects = (discovered,)
-            remember_projects(account.profile, projects)
-            log(f"  {account.label} holds {discovered}.")
-
         api = context.request
+
+        def list_projects():
+            """Seller Center's own project directory: no payload and no project scope, so it answers
+            with every project this account holds rather than the one the catalog happened to open."""
+            answer = api.post(PROJECTS_API, headers=dict(captured["headers"]), timeout=60_000)
+            return answer.json() if answer.status == 200 else {}
+
+        # Asked of noon every time, so an account that gained a project since last run holds it now.
+        projects = projects_held(account, list_projects, captured["headers"])
+        if not projects:
+            raise SellerSessionError(f"{account.label} didn't say which projects it holds.")
+        log(f"  {account.label} holds {', '.join(projects)}.")
+
         wanted = (country or "").upper()
         for project in projects:
             headers = dict(captured["headers"])
@@ -300,9 +303,9 @@ def sign_in_account(profile: str, country: str = COUNTRY, log: Callable[[str], N
     The account asked for is the account opened, or none is: falling back to another profile would
     sign in as somebody else and then offer their stores under this account's name.
     """
-    wanted = os.path.expanduser(profile)
+    wanted = _canonical(profile)
     account = next((known for known in load_accounts(path, pattern)
-                    if os.path.expanduser(known.profile) == wanted), None)
+                    if _canonical(known.profile) == wanted), None)
     if account is None:
         raise SellerSessionError("That account is no longer on this computer. Add it again to sign in.")
     return (read or _read_account)(account, country, log)

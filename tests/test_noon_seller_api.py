@@ -1,5 +1,6 @@
 """The Seller Center catalog adapter: everything that needs no browser, and the crawl it drives."""
 import json
+import ntpath
 import os
 import sys
 import tempfile
@@ -12,9 +13,11 @@ from datetime import datetime
 
 from noon_store.adapters.excel_repository import ExcelListingRepository
 from noon_store.adapters.noon_seller_api import (BRAND_SEPARATOR, SEPARATOR, Account, _brand_groups,
-                                                 _categories, _filters, _project, _sort, _store_code,
-                                                 _fetch_profile, _to_product, landed_project,
-                                                 load_accounts, profile_for_project, remember_projects)
+                                                 _canonical, _categories, _filters, _project, _sort,
+                                                 _store_code, _fetch_profile, _to_product,
+                                                 account_projects, forget_profile, landed_project,
+                                                 load_accounts, profile_for_project, projects_held,
+                                                 remember_projects)
 from noon_store.domain import CatalogPage, CatalogQuery, Category, Product, StoreError, StoreRef
 from noon_store.use_cases import FetchStore
 
@@ -62,39 +65,91 @@ class AccountTests(unittest.TestCase):
     def test_every_signed_in_profile_is_an_account(self):
         with signed_in("noon_seller_profile", "noon_seller_profile_2", "noon_seller_profile_x") as (
                 pattern, kept, home):
-            found = load_accounts(path=kept, pattern=pattern, seed={})
+            found = load_accounts(path=kept, pattern=pattern)
         self.assertEqual([account.label for account in found],
                          ["noon_seller_profile", "noon_seller_profile_2", "noon_seller_profile_x"])
 
     def test_an_account_nobody_signed_into_is_not_offered(self):
         with signed_in() as (pattern, kept, _):
-            self.assertEqual(load_accounts(path=kept, pattern=pattern, seed={}), ())
+            self.assertEqual(load_accounts(path=kept, pattern=pattern), ())
 
     def test_an_account_keeps_the_projects_last_discovered_in_it(self):
         with signed_in("noon_seller_profile_2",
                        remembered={"noon_seller_profile_2": ["PRJ55555"]}) as (pattern, kept, _):
-            found = load_accounts(path=kept, pattern=pattern, seed={})
+            found = load_accounts(path=kept, pattern=pattern)
         self.assertEqual(found[0].projects, ("PRJ55555",))
 
     def test_a_new_account_starts_with_no_projects_rather_than_being_skipped(self):
         with signed_in("noon_seller_profile_2") as (pattern, kept, _):
-            found = load_accounts(path=kept, pattern=pattern, seed={})
+            found = load_accounts(path=kept, pattern=pattern)
         self.assertEqual((found[0].label, found[0].projects), ("noon_seller_profile_2", ()))
-
-    def test_a_seeded_profile_knows_the_projects_noon_cannot_list(self):
-        with signed_in("noon_seller_profile") as (pattern, kept, home):
-            found = load_accounts(path=kept, pattern=pattern,
-                                  seed={os.path.join(home, "noon_seller_profile"): ("PRJ19740",)})
-        self.assertEqual(found[0].projects, ("PRJ19740",))
 
     def test_discovering_a_project_leaves_the_other_accounts_alone(self):
         with signed_in("noon_seller_profile", "noon_seller_profile_2",
                        remembered={"noon_seller_profile": ["PRJ19740"]}) as (pattern, kept, home):
             remember_projects(os.path.join(home, "noon_seller_profile_2"), ["PRJ55555"], path=kept)
             found = {account.label: account.projects
-                     for account in load_accounts(path=kept, pattern=pattern, seed={})}
+                     for account in load_accounts(path=kept, pattern=pattern)}
         self.assertEqual(found, {"noon_seller_profile": ("PRJ19740",),
                                  "noon_seller_profile_2": ("PRJ55555",)})
+
+
+class ProfilePathTests(unittest.TestCase):
+    """One profile directory is one account, however the operating system spells the path to it."""
+
+    def test_the_two_windows_spellings_of_one_profile_are_one_account(self):
+        # On Windows, expanduser substitutes the home directory but leaves the caller's forward slash
+        # alone, while glob rebuilds its results with backslashes. Keyed on the raw strings the two
+        # never match, so every Windows account starts out holding no projects at all.
+        typed = _canonical("C:/Users/you/noon_seller_profile", ntpath)
+        found = _canonical("C:\\Users\\you\\noon_seller_profile", ntpath)
+        self.assertEqual(typed, found)
+
+    def test_a_trailing_separator_does_not_make_a_second_account(self):
+        self.assertEqual(_canonical("/home/you/noon_seller_profile/"),
+                         _canonical("/home/you/noon_seller_profile"))
+
+    def test_a_profile_written_down_by_another_spelling_keeps_its_projects(self):
+        # The same failure Windows hits, in a spelling this machine can reproduce: what was written
+        # down and what glob finds must be the same account, or the account loads holding nothing.
+        with signed_in("noon_seller_profile") as (pattern, kept, home):
+            remember_projects(os.path.join(home, "noon_seller_profile") + os.sep, ["PRJ19740"], path=kept)
+            found = load_accounts(path=kept, pattern=pattern)
+        self.assertEqual(found[0].projects, ("PRJ19740",))
+
+    def test_forgetting_a_profile_spelled_another_way_still_forgets_it(self):
+        # A note left behind is inherited by whoever signs into that directory name next, and their
+        # store would then be fetched through somebody else's session.
+        with signed_in("noon_seller_profile", remembered={"noon_seller_profile": ["PRJ19740"]}) as (
+                pattern, kept, home):
+            forget_profile(os.path.join(home, "noon_seller_profile") + os.sep, path=kept)
+            found = load_accounts(path=kept, pattern=pattern)
+        self.assertEqual(found[0].projects, ())
+
+
+class AccountProjectsTests(unittest.TestCase):
+    """What an account holds is what noon says it holds -- nothing is seeded or typed in."""
+
+    def test_every_project_the_account_holds_is_listed(self):
+        answer = {"projects": [{"projectCode": "PRJ19740", "projectName": "TIGER"},
+                               {"projectCode": "PRJ27379", "projectName": "JAJEEK"},
+                               {"projectCode": "PRJ82799", "projectName": "ELTRAZONE"}]}
+        self.assertEqual(account_projects(lambda: answer), ("PRJ19740", "PRJ27379", "PRJ82799"))
+
+    def test_a_project_named_after_another_project_is_not_mistaken_for_it(self):
+        # Measured on a real account: project names are free text. One is named after another
+        # project's code and one after an email address, so only the code field may be read --
+        # matching codes out of the text would fetch a store through the wrong account's session.
+        answer = {"projects": [{"projectCode": "PRJ467945", "projectName": "PRJ19740"},
+                               {"projectCode": "PRJ555572", "projectName": "someone@example.com"}]}
+        self.assertEqual(account_projects(lambda: answer), ("PRJ467945", "PRJ555572"))
+
+    def test_an_account_holding_nothing_is_no_projects_rather_than_a_failure(self):
+        self.assertEqual(account_projects(lambda: {}), ())
+
+    def test_a_project_without_a_code_is_skipped(self):
+        answer = {"projects": [{"projectName": "half a record"}, {"projectCode": "PRJ19740"}]}
+        self.assertEqual(account_projects(lambda: answer), ("PRJ19740",))
 
 
 class ProfileForProjectTests(unittest.TestCase):
@@ -306,6 +361,57 @@ class SweepTests(unittest.TestCase):
                 "https://www.noon.com/uae-en/p-19740/")
             saved = repository.load(repository.find(StoreRef.parse("https://www.noon.com/uae-en/p-19740/")))
         self.assertIn("SKU-LOST", saved.skus())
+
+
+class ProjectsHeldTests(unittest.TestCase):
+    """Which projects an account reads. noon's own listing is the answer; the landed project is a fallback."""
+
+    def setUp(self):
+        self.written = {}
+
+    def remember(self, profile, projects):
+        self.written[profile] = tuple(projects)
+
+    def listing(self, *codes):
+        return lambda: {"projects": [{"projectCode": code} for code in codes]}
+
+    def test_an_account_reads_every_project_noon_lists_not_only_the_one_it_landed_on(self):
+        account = Account(profile="/home/noon_seller_profile")
+        held = projects_held(account, self.listing("PRJ19740", "PRJ27379", "PRJ82799"),
+                             {"x-project": "PRJ19740"}, self.remember)
+        self.assertEqual(held, ("PRJ19740", "PRJ27379", "PRJ82799"))
+
+    def test_the_projects_noon_listed_are_written_down(self):
+        account = Account(profile="/home/noon_seller_profile")
+        projects_held(account, self.listing("PRJ19740", "PRJ27379"), {"x-project": "PRJ19740"},
+                      self.remember)
+        self.assertEqual(self.written, {"/home/noon_seller_profile": ("PRJ19740", "PRJ27379")})
+
+    def test_a_project_added_since_last_time_is_picked_up(self):
+        # The account was written down holding one project; noon now lists two. noon wins.
+        account = Account(profile="/home/noon_seller_profile", projects=("PRJ19740",))
+        held = projects_held(account, self.listing("PRJ19740", "PRJ27379"), {"x-project": "PRJ19740"},
+                             self.remember)
+        self.assertEqual(held, ("PRJ19740", "PRJ27379"))
+
+    def test_an_account_noon_will_not_list_falls_back_to_the_project_it_landed_on(self):
+        account = Account(profile="/home/noon_seller_profile")
+        held = projects_held(account, lambda: {"projects": []}, {"x-project": "PRJ19740"}, self.remember)
+        self.assertEqual(held, ("PRJ19740",))
+        self.assertEqual(self.written, {"/home/noon_seller_profile": ("PRJ19740",)})
+
+    def test_a_listing_that_fails_falls_back_to_the_project_it_landed_on(self):
+        def refuse():
+            raise RuntimeError("project/list answered 400")
+
+        account = Account(profile="/home/noon_seller_profile")
+        held = projects_held(account, refuse, {"x-project": "PRJ27379"}, self.remember)
+        self.assertEqual(held, ("PRJ27379",))
+
+    def test_an_account_that_names_no_project_at_all_holds_none(self):
+        account = Account(profile="/home/noon_seller_profile")
+        self.assertEqual(projects_held(account, lambda: {"projects": []}, {}, self.remember), ())
+        self.assertEqual(self.written, {}, "an account holding nothing must not be written down as empty")
 
 
 if __name__ == "__main__":
