@@ -25,10 +25,22 @@ import os
 import time
 from typing import Mapping, Optional
 
-from .noon_seller_api import _canonical
-
 SESSION_FILE = "~/.noon_seller_sessions.json"
 DENIED = (401, 403)   # noon turning us away: the one thing that sends us back to Chrome
+
+
+def _canonical(path: str, paths=os.path) -> str:
+    """One spelling of a profile directory, so one account is never taken for two.
+
+    Windows is why. There, expanduser substitutes the home directory but leaves the caller's forward
+    slash alone, while glob rebuilds what it finds with backslashes; keyed on the raw strings the two
+    spellings never match, and every account then starts out holding no projects at all.
+
+    It lives here, depending on nothing, so the module that files sessions and the one that files
+    accounts can share a single definition instead of importing each other in a circle. `paths` is
+    injectable so the Windows behaviour can be reproduced on any machine by passing `ntpath`.
+    """
+    return paths.normpath(paths.expanduser(path))
 
 
 def _all_sessions(path: str) -> dict:
@@ -70,11 +82,29 @@ def load_session(profile: str, path: str = SESSION_FILE) -> Optional[dict]:
 
 
 def save_session(profile: str, state: Mapping, headers: Mapping[str, str],
+                 body: Optional[Mapping] = None, user_agent: str = "",
                  path: str = SESSION_FILE) -> None:
-    """Write down the session a browser just proved, so the next call needs no browser."""
+    """Write down the session a browser just proved, so the next call needs no browser.
+
+    The catalog needs more than the cookies to ask a question: `body` is the request template the
+    account's own page sends, which the caller varies a page and a sort at a time, and `user_agent`
+    is the browser's own -- sent so a request made outside the page still describes the client the
+    session belongs to, rather than announcing itself as a different one.
+    """
     found = _all_sessions(path)
-    found[_canonical(profile)] = {"state": dict(state), "headers": dict(headers),
-                                  "saved_at": int(time.time())}
+    saved = {"state": dict(state), "headers": dict(headers), "saved_at": int(time.time())}
+    if body is not None:
+        saved["body"] = dict(body)
+    if user_agent:
+        saved["user_agent"] = user_agent
+    # Merged over whatever is already filed: the stores path saves no body and the catalog path does,
+    # and whichever ran last must not throw away what the other had learned about this account.
+    existing = _all_sessions(path).get(_canonical(profile))
+    if isinstance(existing, dict):
+        merged = dict(existing)
+        merged.update(saved)
+        saved = merged
+    found[_canonical(profile)] = saved
     _write(found, path)
 
 

@@ -1011,17 +1011,37 @@ class SearchTab(ttk.Frame):
             ttk.Label(self._stores_body, text="No stores yet — Load Stores reads them from your "
                                               "accounts.").pack(anchor="w")
 
+        # Ticked stores survive a redraw: the dialog is drawn again whenever the stores change, and a
+        # tick lost to that would quietly drop a store out of the refresh somebody had just asked for.
+        ticked = getattr(self, "_store_ticks", {})
+        self._store_ticks = {}
+
         for view in views:
             if not view.stores:
                 continue
             ttk.Label(self._stores_body, text=view.title,
                       font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(8, 2))
             for label, _ in view.stores:
+                row = ttk.Frame(self._stores_body)
+                row.pack(fill="x", padx=(14, 0))
+                # A tick chooses which stores Fetch and Refresh act on -- several at a time, which is
+                # what they do anyway; the radio beside it still names the one store the search uses.
+                tick = tk.BooleanVar(value=bool(ticked.get(label, tk.BooleanVar()).get())
+                                     if label in ticked else False)
+                self._store_ticks[label] = tick
+                box = ttk.Checkbutton(row, variable=tick)
+                box.pack(side="left")
                 # The link is looked up by label, so the label is what the choice carries
-                button = ttk.Radiobutton(self._stores_body, text=label, value=label,
+                button = ttk.Radiobutton(row, text=label, value=label,
                                          variable=self.store_url_var)
-                button.pack(anchor="w", padx=(14, 0))
-                self._stores_widgets.append(button)
+                button.pack(side="left")
+                # A store with no workbook yet cannot be refreshed, only fetched. Saying so here is the
+                # whole answer to "why did two of my four stores refresh?" -- the other two were never
+                # fetched, and Refresh had nothing of theirs to add to.
+                if not self._has_listing(label):
+                    ttk.Label(row, text="not fetched yet", font=("Segoe UI", 8),
+                              foreground="#777777").pack(side="left", padx=(6, 0))
+                self._stores_widgets += [box, button]
 
         if orphans:
             # Saved with a store box from an account since removed: nothing can fetch these
@@ -1044,15 +1064,57 @@ class SearchTab(ttk.Frame):
         # freshly built controls start enabled, and would offer to start a second one.
         self._enable_store_box(not self.is_running)
 
+    def _has_listing(self, label):
+        """Whether this store has been fetched -- i.e. whether a workbook of it is saved to refresh."""
+        link = self.store_choices.get(label, "")
+        try:
+            return bool(link) and bool(noon_store.find_listing(link, "input_data"))
+        except Exception:
+            return False   # a link that isn't a store has no listing, which is all this asks
+
+    def _ticked_stores(self):
+        """The labels of the ticked stores, in the order they are drawn; the chosen one if none is."""
+        ticked = [label for label, tick in getattr(self, "_store_ticks", {}).items() if tick.get()]
+        if ticked:
+            return ticked
+        chosen = self.store_url_var.get()
+        return [chosen] if chosen in self.store_choices else []
+
     def _load_from_dialog(self):
         """The dialog stays open while the work runs: its controls go dead, not the window itself."""
         self.start_load_stores()
 
     def _fetch_from_dialog(self):
-        self.start_fetch_store()
+        """Fetch every ticked store, one after another, rather than only the one the radio names."""
+        labels = self._ticked_stores()
+        if not labels:
+            messagebox.showinfo("Fetch Store", "Tick the stores to fetch first.")
+            return
+        links = [self.store_choices[label] for label in labels if label in self.store_choices]
+        self._start_store_task(f"Fetching {len(links)} store(s)...", self._fetch_stores, links)
 
     def _refresh_from_dialog(self):
-        self.start_refresh_listing()
+        """Refresh the ticked stores, and say plainly which of them there was nothing saved to refresh.
+
+        Refresh adds new arrivals to a workbook that already exists; a store nobody has fetched has no
+        workbook, so it is named here rather than passed over in silence.
+        """
+        labels = self._ticked_stores()
+        if not labels:
+            messagebox.showinfo("Refresh", "Tick the stores to refresh first.")
+            return
+        never = [label for label in labels if not self._has_listing(label)]
+        paths = [noon_store.find_listing(self.store_choices[label], "input_data")
+                 for label in labels if self._has_listing(label)]
+        if not paths:
+            messagebox.showinfo("Refresh", "None of the ticked stores has been fetched yet, so there "
+                                           "is nothing saved to add new arrivals to. Use Fetch Store "
+                                           "first:\n\n" + "\n".join(never))
+            return
+        if never:
+            self._store_log(f"Not fetched yet, so nothing to refresh: {', '.join(never)}.")
+        self._start_store_task(f"Checking {len(paths)} store(s) for new arrivals...",
+                               self._refresh_listings, paths)
 
     def open_accounts(self):
         """Show the noon accounts: what each holds, and how to add, re-sign or remove one."""
@@ -1225,6 +1287,26 @@ class SearchTab(ttk.Frame):
             thread_safe_stderr.redirectors.pop(tid, None)
             self.is_running = False
         self.main_app.root.after(0, self._on_store_task_done, *outcome)
+
+    def _fetch_stores(self, urls):
+        """Fetch several stores in turn. One that fails costs only itself, not the stores after it."""
+        saved, failed = [], []
+        for number, url in enumerate(urls, start=1):
+            if self.stop_event.is_set():
+                raise noon_store.StopRequested()
+            print(f"Store {number} of {len(urls)}...")
+            try:
+                message, paths = self._fetch_store(url)
+                print(message)
+                saved += paths
+            except noon_store.StopRequested:
+                raise
+            except Exception as e:
+                failed.append(f"{url}: {e}")
+                print(f"Skipped {url}: {e}")
+        if failed and not saved:
+            raise noon_store.StoreError("; ".join(failed))
+        return f"Saved {len(saved)} store listing(s).", saved
 
     def _fetch_store(self, url):
         def show_progress(done, total):

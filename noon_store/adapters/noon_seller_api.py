@@ -5,14 +5,21 @@ answers the same catalog as JSON, 100 records a page and 100 pages deep, with th
 record -- so a store is read from the account that owns it rather than scraped from its public pages.
 
 Each account is signed into once, by hand, in a Chrome profile of its own (noon_seller_stores lists them,
-one account per profile directory); the session then persists there, and later fetches reuse it in a
-window hidden the moment it opens -- off the edge of the screen where that works, and minimised on macOS,
-which ignores where a window is put. A store is read through the account that
-owns it, which the store's project code names. Headless is not an option: Seller Center drops the connection outright (ERR_HTTP2_PROTOCOL_ERROR)
-rather than answer a browser that announces itself as headless, and the only way around that would be to
-lie about what it is. Signing in stays visible, because only a person can do it. Nothing here reads, stores or replays a cookie or token: the requests are made from
-inside the signed-in page, so Chrome attaches its own session, and the headers the app sends are captured
-in memory for the length of one fetch only -- never printed, logged or written to disk.
+one account per profile directory). A store is read through the account that owns it, which the store's
+project code names.
+
+Chrome is the fallback, not the way in. The session a sign-in proves is written down once (see
+`seller_session`) and every fetch and refresh after that runs on a plain HTTP client carrying those
+cookies -- no browser, no window, nothing to hide. Chrome opens only when no session has been written
+down for the account, or when noon refuses the one that was: a 401 or 403 is the single signal that it
+has lapsed, and nothing here tries to guess at that in advance. What is saved is the user's own session,
+sent back to the host that issued it and to no other.
+
+When Chrome is opened it is headed and hidden -- off the edge of the screen where that works, and
+minimised on macOS, which ignores where a window is put. Headless is not an option: Seller Center drops
+the connection outright (ERR_HTTP2_PROTOCOL_ERROR) rather than answer a browser that announces itself as
+headless, and the only way around that would be to lie about what it is. Signing in stays visible,
+because only a person can do it.
 
 The cap on one query is worked around exactly as the use cases already do it, by narrowing: `family` is
 offered to the crawler as a top-level category and each family's `brand` facet as its children. Prices
@@ -24,12 +31,19 @@ import glob
 import json
 import os
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Callable, Mapping, Optional, Sequence
 from urllib.parse import quote
 
 from ..domain import CatalogPage, CatalogQuery, Category, Product, StoreError, StoreRef
 from .window import hide_window
+# One spelling of a profile directory, and one saved session per account. Both live in seller_session,
+# which imports nothing from here: a profile is keyed the same way whether an account or a session is
+# being filed under it, and two definitions of that would drift apart exactly once and cost an account
+# its projects. Re-exported, since this module is where callers have always found it.
+from .seller_session import DENIED, _canonical, forget_session, load_session, save_session
 
 PROFILE_DIR_ENV = "NOON_PROFILE"
 HEADED_ENV = "NOON_HEADED"   # set to watch a fetch on-screen; otherwise its window is hidden as it opens
@@ -129,16 +143,6 @@ def _remembered(path: str) -> dict:
     # One spelling per profile, whatever spelling it was written down in: a file written on Windows
     # keys its profiles the way that run happened to spell them.
     return {_canonical(profile): projects for profile, projects in found.items()}
-
-
-def _canonical(path: str, paths=os.path) -> str:
-    """One spelling of a profile directory, so one account is never taken for two.
-
-    Windows is why. There, expanduser substitutes the home directory but leaves the caller's forward
-    slash alone, while glob rebuilds what it finds with backslashes; keyed on the raw strings the two
-    spellings never match, and every account then starts out holding no projects at all.
-    """
-    return paths.normpath(paths.expanduser(path))
 
 
 def load_accounts(path: str = ACCOUNTS_FILE, pattern: str = PROFILE_GLOB) -> tuple[Account, ...]:
@@ -327,6 +331,63 @@ def _brand_groups(buckets: list, cap: int) -> list[list[str]]:
     return groups
 
 
+class _Denied(StoreError):
+    """noon refused the saved session. Answerable: Chrome opens once and replaces it."""
+
+
+class _SavedSessionCaller:
+    """Makes the account's own requests with no browser at all, carrying the saved session's cookies.
+
+    The page used to make these itself, which meant a fetch could not start without twelve seconds of
+    Chrome. What the page actually contributed was its cookies: the requests are ordinary POSTs. So they
+    are made here instead, from the same cookies, and Chrome is not involved in a fetch at all.
+
+    The user agent is the one the browser sent when the session was saved. That is not a disguise: it is
+    the client the session belongs to, and sending a different one would describe the request falsely.
+    """
+
+    def __init__(self, cookies: Sequence[Mapping], user_agent: str = ""):
+        import requests   # imported late, like playwright: only a fetch needs it
+
+        self._session = requests.Session()
+        for cookie in cookies:
+            name, value = cookie.get("name"), cookie.get("value")
+            if name and value is not None:
+                self._session.cookies.set(name, value, domain=cookie.get("domain") or "",
+                                          path=cookie.get("path") or "/")
+        if user_agent:
+            self._session.headers["User-Agent"] = user_agent
+
+    def post_all(self, url: str, bodies: list, headers: Mapping[str, str],
+                 concurrency: int, timeout: int) -> list:
+        """Post every body, `concurrency` in flight, in the shape the in-page version answered in.
+
+        noon limits the rate, not the number in flight, so the requests go out together exactly as they
+        did from the page; a refusal comes back as its status for the caller to ask again about.
+        """
+        def post(body):
+            try:
+                answer = self._session.post(url, json=body, headers=dict(headers), timeout=timeout)
+                return {"status": answer.status_code,
+                        "data": answer.json() if answer.status_code == 200 else None}
+            except Exception as error:
+                return {"status": 0, "error": _first_line(error)}
+
+        if not bodies:
+            return []
+        with ThreadPoolExecutor(max_workers=min(concurrency, len(bodies))) as pool:
+            return list(pool.map(post, bodies))
+
+    def get_json(self, url: str, headers: Mapping[str, str], timeout: int) -> tuple:
+        answer = self._session.get(url, headers=dict(headers), timeout=timeout)
+        if answer.status_code in DENIED:
+            raise _Denied("The saved noon session has lapsed.")
+        return answer.status_code, (answer.json() if answer.status_code == 200 else None)
+
+    def close(self) -> None:
+        self._session.close()
+
+
 class SellerBrowser:
     """One Chrome per signed-in account, shared by every store read through that account.
 
@@ -433,6 +494,7 @@ class NoonSellerApiCatalog:
         self._browser = browser        # the caller's, to be left open
         self._own_browser = None       # this store's own, to be closed with it
         self._context = self._page = None
+        self._caller = None            # the saved session's client, when no browser was needed
         self._concurrency = CONCURRENCY
         self._gap = GAP
         self._throttled = False   # whether the fast allowance has already been reported as spent
@@ -442,6 +504,11 @@ class NoonSellerApiCatalog:
 
     def __enter__(self) -> "NoonSellerApiCatalog":
         profile = _fetch_profile(self.store, os.environ.get(PROFILE_DIR_ENV, ""))
+
+        # The saved session first, always: a fetch that can be served from it never opens Chrome.
+        if self._start_from_saved(profile):
+            return self
+
         # Either the caller's browser, shared with every other store it reads, or one just for this store.
         # Going through a SellerBrowser either way keeps starting Chrome in one place.
         self._own_browser = None if self._browser else SellerBrowser()
@@ -456,9 +523,45 @@ class NoonSellerApiCatalog:
             raise
         return self
 
+    def _start_from_saved(self, profile: str) -> bool:
+        """Set this store up to read through the saved session, or say that it cannot be.
+
+        The session is proved before it is trusted, by the one call that names the store: a session
+        checked only when the first page of products is asked for would fail a fetch already under way
+        instead of quietly falling back to Chrome here.
+        """
+        saved = load_session(profile) or {}
+        if not saved.get("body") or not (saved.get("state") or {}).get("cookies"):
+            return False   # nothing saved, or saved by the stores path, which captures no request body
+
+        caller = _SavedSessionCaller((saved["state"] or {}).get("cookies") or [],
+                                     saved.get("user_agent") or "")
+        try:
+            self._caller = caller
+            self._headers = {**saved["headers"], "x-project": _project(self.store)}
+            self._base_body = dict(saved["body"])
+            self._base_body["noon_store_code"] = _store_code(self.store)
+            self._base_filters = dict(self._base_body.get("filters") or {})
+            self.store_name = self._name_of_store()
+            return True
+        except _Denied:
+            # Expected: noon's cookies last about an hour. Not reported as trouble -- Chrome opens once
+            # below, and saves a session in its place.
+            forget_session(profile)
+        except Exception:
+            # A saved session that cannot be used for any other reason is not worth failing over either.
+            forget_session(profile)
+        self._caller = None
+        caller.close()
+        self._headers, self._base_body, self._base_filters = {}, {}, {}
+        return False
+
     def __exit__(self, *exc_info) -> None:
         self._headers.clear()   # drop the captured context as soon as it is done with
         self._context = self._page = None
+        if self._caller:
+            self._caller.close()
+            self._caller = None
         # A borrowed browser belongs to the caller and stays open for the next store; only one opened
         # for this store alone is closed here, which is what lets its profile keep the session.
         if self._own_browser:
@@ -498,12 +601,22 @@ class NoonSellerApiCatalog:
         refusals = 0
         for attempt in range(ATTEMPTS):
             answers = self._post(url, [bodies[i] for i in pending])
-            refused = []
+            refused, denied = [], 0
             for i, answer in zip(pending, answers):
-                if int(answer.get("status") or 0) == 200:
+                status = int(answer.get("status") or 0)
+                if status == 200:
                     results[i] = ((answer.get("data") or {}).get("data") or {})
                 else:
                     refused.append(i)
+                    denied += status in DENIED
+            # A saved session can lapse in the middle of a long store: noon's cookies last about an hour
+            # and a big store takes minutes. Refusing everything with a 401 is not throttling, and asking
+            # again fifteen times would end in a message blaming a rate limit for an expired login. The
+            # session is dropped instead, so the next fetch opens Chrome and signs back in.
+            if self._caller and refused and denied == len(refused):
+                forget_session(_fetch_profile(self.store, os.environ.get(PROFILE_DIR_ENV, "")))
+                raise StoreError("The saved noon session expired while the store was being read. "
+                                 "Fetch again -- it will sign in and carry on.")
             pending = refused
             if not pending:
                 if refusals and not self._throttled:
@@ -514,7 +627,7 @@ class NoonSellerApiCatalog:
             # The fast allowance is spent, so noon is granting only a couple a second now. Pause briefly and
             # ask again for what it refused: a refusal returns at once and costs nothing, and keeping the
             # requests in flight is what takes up the rate as noon frees it.
-            self._page.wait_for_timeout(PAUSE)
+            self._pause(PAUSE)
         raise StoreError(f"noon kept refusing {len(pending)} request(s) even after slowing right down. "
                          f"Try again in a few minutes; if it persists, use Load Stores to sign in again.")
 
@@ -526,9 +639,19 @@ class NoonSellerApiCatalog:
                      "sort": sort, "direction": direction})
         return body
 
+    def _pause(self, milliseconds: int) -> None:
+        """Wait, whether or not there is a page to wait in."""
+        if self._page:
+            self._page.wait_for_timeout(milliseconds)
+        else:
+            time.sleep(milliseconds / 1000)
+
     def _post(self, url: str, bodies: list[dict]) -> list[dict]:
         if not bodies:
             return []
+        if self._caller:
+            return self._caller.post_all(url, bodies, self._headers,
+                                         self._concurrency, REQUEST_TIMEOUT)
         try:
             return self._page.evaluate(_POST_JS, {
                 "url": url, "bodies": bodies, "headers": self._headers,
@@ -593,19 +716,38 @@ class NoonSellerApiCatalog:
             # with the store that added it -- left on, every later store would add another.
             self._page.remove_listener("request", on_request)
 
+        # Written down the moment it is known good, so this is the last fetch that needs a browser.
+        try:
+            save_session(_fetch_profile(self.store, os.environ.get(PROFILE_DIR_ENV, "")),
+                         self._context.storage_state(), captured["headers"], captured["body"],
+                         self._page.evaluate("navigator.userAgent"))
+        except Exception as error:
+            self.log(f"  (the session couldn't be saved: {_first_line(error)})")
+
         return {"headers": captured["headers"], "body": captured["body"]}
 
     def _name_of_store(self) -> str:
-        """The account's own name for this store, used for the listing's file name."""
+        """The account's own name for this store, used for the listing's file name.
+
+        On the saved-session path this is also what proves the session: a refusal here is raised rather
+        than swallowed, so the caller can open Chrome instead. Any other trouble still falls back to the
+        store's own path, which names the file well enough.
+        """
         code = _store_code(self.store)
+        headers = {**self._headers, "x-project": _project(self.store)}
         try:
-            response = self._context.request.get(
-                STORES_API, headers={**self._headers, "x-project": _project(self.store)}, timeout=60_000)
-            if response.status != 200:
+            if self._caller:
+                status, body = self._caller.get_json(STORES_API, headers, REQUEST_TIMEOUT)
+            else:
+                response = self._context.request.get(STORES_API, headers=headers, timeout=60_000)
+                status, body = response.status, (response.json() if response.status == 200 else None)
+            if status != 200:
                 return self.store.path
-            for raw in (response.json() or {}).get("noon_stores") or []:
+            for raw in (body or {}).get("noon_stores") or []:
                 if raw.get("noon_store_code") == code:
                     return ((raw.get("name_locale") or {}).get("name_en") or "").strip() or self.store.path
+        except _Denied:
+            raise
         except Exception:
             pass
         return self.store.path
