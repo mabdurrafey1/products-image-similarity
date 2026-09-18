@@ -8,9 +8,15 @@ of the program already keeps.
 Signing in happens once per account, by hand, in that account's own Chrome profile; the session then
 persists there. A profile is one cookie jar, so no two accounts can share one: each keeps its own
 directory, any number of them may exist, and making a directory and signing into it is the whole of
-adding an account -- which is all Add Account does. Nothing here reads, stores or replays a cookie or token: Chrome authenticates from
-its own profile, and the headers the app sends are captured in memory for the length of one call only
--- never printed, logged or written to disk.
+adding an account -- which is all Add Account does.
+
+Chrome is opened once per account and not again. The session it proves is written down (see
+`seller_session`) and every later read goes straight to the API with no browser at all -- seconds
+instead of the six a launch costs, per account, every time. Chrome comes back only when there is
+nothing written down for that account, or when noon refuses the saved session: a refusal is the one
+signal that it has lapsed, and nothing here tries to guess at that ahead of time. What is written
+down is the account's own session, and it is the user's own account: no cookie of anyone else's is
+read, and none is replayed at a host that did not issue it.
 
 No store or project is written into this source. Each account is asked what it holds, every time it is
 read: Seller Center's own toolbar lists an account's projects at `project/list`, posted with no project
@@ -32,6 +38,7 @@ from noon_store.adapters.window import hide_window
 from noon_store.adapters.noon_seller_api import (ACCOUNTS_FILE, OFFSCREEN, PROFILE_GLOB, PROJECTS_API,
                                                  Account, _canonical, forget_profile, load_accounts,
                                                  projects_held)
+from noon_store.adapters.seller_session import DENIED, forget_session, load_session, save_session
 
 COUNTRY = os.environ.get("NOON_COUNTRY", "AE")   # the accounts trade in the UAE only
 
@@ -47,6 +54,14 @@ LOCALES = {"AE": "uae-en", "SA": "ksa-en", "EG": "egypt-en"}
 
 class SellerSessionError(Exception):
     """Raised when the Chrome profile has no usable Seller Center session."""
+
+
+class SessionDenied(SellerSessionError):
+    """noon turned the session away -- the one signal that it has lapsed.
+
+    Told apart from its parent because it is answerable: a saved session that is refused sends us to
+    Chrome once and is replaced, where any other trouble is reported as it stands.
+    """
 
 
 @dataclass(frozen=True)
@@ -132,7 +147,79 @@ def fetch_stores(accounts: Optional[Sequence[Account]] = None, country: str = CO
 
 def _account_stores(playwright, account: Account, country: str,
                     log: Callable[[str], None], wait_for_login: bool) -> list[SellerStore]:
-    """The active stores of one account, read through the profile that account is signed into."""
+    """The active stores of one account -- from its saved session if it still holds, else Chrome."""
+    saved = load_session(account.profile)
+    if saved:
+        api = playwright.request.new_context(storage_state=saved["state"])
+        try:
+            return _read_stores(api, saved["headers"], account, country, log)
+        except SessionDenied:
+            # The session lapsed. This is expected -- noon's cookies last about an hour -- so it is
+            # not reported as trouble: Chrome opens once below and the saved session is replaced.
+            forget_session(account.profile)
+        finally:
+            api.dispose()
+    return _browser_stores(playwright, account, country, log, wait_for_login)
+
+
+def _read_stores(api, headers: Mapping[str, str], account: Account, country: str,
+                 log: Callable[[str], None]) -> list[SellerStore]:
+    """Every active store the account holds, asked of the APIs through whatever context is given.
+
+    The context is the whole difference between the two paths: a browser's, or one built from the
+    saved session with no browser behind it. The questions asked of noon are identical.
+    """
+    stores: list[SellerStore] = []
+
+    def list_projects():
+        """Seller Center's own project directory: no payload and no project scope, so it answers
+        with every project this account holds rather than the one the catalog happened to open."""
+        answer = api.post(PROJECTS_API, headers=dict(headers), timeout=60_000)
+        if answer.status in DENIED:
+            # Checked here because this is the first call a lapsed session reaches: left to the
+            # store list below, an expired cookie would be reported as an account that named no
+            # projects, and Chrome would never be opened to put it right.
+            raise SessionDenied(f"{account.label} is signed out. Sign in again to refresh its stores.")
+        return answer.json() if answer.status == 200 else {}
+
+    # Asked of noon every time, so an account that gained a project since last run holds it now.
+    projects = projects_held(account, list_projects, headers)
+    if not projects:
+        raise SellerSessionError(f"{account.label} didn't say which projects it holds.")
+    log(f"  {account.label} holds {', '.join(projects)}.")
+
+    wanted = (country or "").upper()
+    for project in projects:
+        scoped = dict(headers)
+        scoped["x-project"] = project     # the store list is scoped to one project at a time
+        try:
+            response = api.get(STORES_API, headers=scoped, timeout=60_000)
+        except Exception as error:
+            log(f"  {project}: {str(error)[:70]}")
+            continue
+        if response.status in DENIED:
+            raise SessionDenied(f"{account.label} is signed out. Sign in again to refresh its stores.")
+        if response.status != 200:
+            log(f"  {project}: the store list answered {response.status}")
+            continue
+        for raw in (response.json() or {}).get("noon_stores") or []:
+            if (raw.get("status_code") or "").upper() != "ACTIVE":
+                continue
+            if wanted and (raw.get("country_code") or "").upper() != wanted:
+                continue
+            store = _to_store(raw)
+            if store:
+                stores.append(store)
+    return stores
+
+
+def _browser_stores(playwright, account: Account, country: str,
+                    log: Callable[[str], None], wait_for_login: bool) -> list[SellerStore]:
+    """The active stores of one account, read through the profile that account is signed into.
+
+    The one path that opens Chrome, and the only place a session is written down: whatever this
+    proves is saved, so the next read of this account needs no browser.
+    """
     captured: dict = {}      # in memory for this account only
     stores: list[SellerStore] = []
 
@@ -192,43 +279,14 @@ def _account_stores(playwright, account: Account, country: str,
             raise SellerSessionError(
                 f"Seller Center didn't load its catalog for {account.label}, so its stores were skipped.")
 
-        api = context.request
+        # Written down before the stores are read: this is the moment the session is known good, and
+        # a project that answers badly afterwards is no reason to make the next run open Chrome again.
+        try:
+            save_session(account.profile, context.storage_state(), captured["headers"])
+        except Exception as error:
+            log(f"  {account.label}: the session couldn't be saved ({str(error)[:50]}).")
 
-        def list_projects():
-            """Seller Center's own project directory: no payload and no project scope, so it answers
-            with every project this account holds rather than the one the catalog happened to open."""
-            answer = api.post(PROJECTS_API, headers=dict(captured["headers"]), timeout=60_000)
-            return answer.json() if answer.status == 200 else {}
-
-        # Asked of noon every time, so an account that gained a project since last run holds it now.
-        projects = projects_held(account, list_projects, captured["headers"])
-        if not projects:
-            raise SellerSessionError(f"{account.label} didn't say which projects it holds.")
-        log(f"  {account.label} holds {', '.join(projects)}.")
-
-        wanted = (country or "").upper()
-        for project in projects:
-            headers = dict(captured["headers"])
-            headers["x-project"] = project     # the store list is scoped to one project at a time
-            try:
-                response = api.get(STORES_API, headers=headers, timeout=60_000)
-            except Exception as error:
-                log(f"  {project}: {str(error)[:70]}")
-                continue
-            if response.status in (401, 403):
-                raise SellerSessionError(
-                    f"{account.label} is signed out. Sign in again to refresh its stores.")
-            if response.status != 200:
-                log(f"  {project}: the store list answered {response.status}")
-                continue
-            for raw in (response.json() or {}).get("noon_stores") or []:
-                if (raw.get("status_code") or "").upper() != "ACTIVE":
-                    continue
-                if wanted and (raw.get("country_code") or "").upper() != wanted:
-                    continue
-                store = _to_store(raw)
-                if store:
-                    stores.append(store)
+        stores = _read_stores(context.request, captured["headers"], account, country, log)
     finally:
         captured.clear()      # drop the captured context as soon as it is done with
         try:
@@ -340,6 +398,9 @@ def remove_account(profile: str, accounts_file: str = ACCOUNTS_FILE) -> None:
     """
     shutil.rmtree(os.path.expanduser(profile), ignore_errors=True)
     forget_profile(profile, accounts_file)
+    # The saved session has to go with it, or it would be inherited by whoever signs into that
+    # directory name next, and their stores read through cookies belonging to the account just removed.
+    forget_session(profile)
 
 
 @dataclass(frozen=True)

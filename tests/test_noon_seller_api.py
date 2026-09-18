@@ -414,5 +414,333 @@ class ProjectsHeldTests(unittest.TestCase):
         self.assertEqual(self.written, {}, "an account holding nothing must not be written down as empty")
 
 
+class FakeContext:
+    """Stands in for a launched Chrome so the tests never start a browser."""
+
+    def __init__(self, profile):
+        self.profile = profile
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+class SellerBrowserTests(unittest.TestCase):
+    """One Chrome per signed-in account, shared by every store read through that account.
+
+    Starting Chrome is almost the whole cost of reading a store: the requests themselves take under two
+    seconds, the launch about twelve. Reading seven stores used to pay that twelve seconds seven times.
+    """
+
+    def setUp(self):
+        from noon_store.adapters.noon_seller_api import SellerBrowser
+        self.launched = []
+
+        def launch(profile):
+            context = FakeContext(profile)
+            self.launched.append(context)
+            return context, f"page for {profile}"
+
+        self.browser = SellerBrowser(launch=launch)
+
+    def test_many_stores_of_one_account_share_a_single_launch(self):
+        with self.browser as browser:
+            for _ in range(7):
+                browser.page_for("/home/noon_seller_profile")
+        self.assertEqual(len(self.launched), 1,
+                         "seven stores of one account must start Chrome once, not seven times")
+
+    def test_a_store_is_read_through_the_page_its_account_is_signed_into(self):
+        with self.browser as browser:
+            _, first = browser.page_for("/home/noon_seller_profile")
+            _, again = browser.page_for("/home/noon_seller_profile")
+        self.assertEqual(first, again, "the second store must reuse the signed-in page, not a new one")
+
+    def test_a_second_account_gets_a_browser_of_its_own(self):
+        # A profile is one cookie jar, so two accounts cannot share a browser however much it would save.
+        with self.browser as browser:
+            browser.page_for("/home/noon_seller_profile")
+            browser.page_for("/home/noon_seller_profile_2")
+        self.assertEqual([context.profile for context in self.launched],
+                         ["/home/noon_seller_profile", "/home/noon_seller_profile_2"])
+
+    def test_letting_go_closes_every_browser_it_opened(self):
+        # Chrome only writes the session back to the profile on a clean exit, so nothing may be left open.
+        with self.browser as browser:
+            browser.page_for("/home/noon_seller_profile")
+            browser.page_for("/home/noon_seller_profile_2")
+        self.assertTrue(all(context.closed for context in self.launched),
+                        "a profile left open loses the signed-in session it was holding")
+
+    def test_a_browser_that_will_not_close_does_not_strand_the_others(self):
+        with self.browser as browser:
+            first, _ = browser.page_for("/home/noon_seller_profile")
+            browser.page_for("/home/noon_seller_profile_2")
+            first.close = lambda: (_ for _ in ()).throw(RuntimeError("Chrome is already gone"))
+        self.assertTrue(self.launched[1].closed, "one browser failing to close must not leave the rest open")
+
+
+class SharedContextTests(unittest.TestCase):
+    """The captured catalog context belongs to the account, not to each of its stores.
+
+    Opening the catalog costs about six seconds and exists only to capture the headers and body template a
+    store read sends. Every store of one account was paying that, though the only difference between them
+    is the project the headers name -- so seven stores paid forty seconds to learn the same thing seven
+    times. Captured once per account, a second store costs about a second.
+    """
+
+    def setUp(self):
+        from noon_store.adapters.noon_seller_api import SellerBrowser
+
+        self.browser = SellerBrowser(launch=lambda profile: (FakeContext(profile), f"page for {profile}"))
+        self.captures = []
+
+    def capture(self, project):
+        """Stands in for the six-second catalog load, recording that it happened."""
+        def capturing():
+            self.captures.append(project)
+            return {"headers": {"x-project": project}, "body": {"noon_store_code": "STR1-NAE"}}
+        return capturing
+
+    def test_the_catalog_is_opened_once_however_many_stores_the_account_has(self):
+        with self.browser as browser:
+            for _ in range(7):
+                browser.context_for("/home/noon_seller_profile", self.capture("PRJ1"))
+        self.assertEqual(len(self.captures), 1,
+                         "seven stores of one account must open the catalog once, not seven times")
+
+    def test_every_store_is_given_the_context_that_was_captured(self):
+        with self.browser as browser:
+            first = browser.context_for("/home/noon_seller_profile", self.capture("PRJ1"))
+            again = browser.context_for("/home/noon_seller_profile", self.capture("PRJ1"))
+        self.assertEqual(first, again, "the second store must be given the captured context, not an empty one")
+
+    def test_a_second_account_captures_a_context_of_its_own(self):
+        # A context carries the account's own project and is read with that account's cookies, so sharing
+        # one between accounts would read the wrong catalog -- or somebody else's.
+        with self.browser as browser:
+            browser.context_for("/home/noon_seller_profile", self.capture("PRJ1"))
+            browser.context_for("/home/noon_seller_profile_2", self.capture("PRJ2"))
+        self.assertEqual(self.captures, ["PRJ1", "PRJ2"])
+
+    def test_a_capture_that_fails_is_not_remembered_as_the_account_s_context(self):
+        # A store that failed to open the catalog must not leave the next one holding an empty context, which
+        # would fail every read of the account instead of just the one.
+        def refuse():
+            raise StoreError("Seller Center didn't load its catalog, so the store couldn't be read.")
+
+        with self.browser as browser:
+            with self.assertRaises(StoreError):
+                browser.context_for("/home/noon_seller_profile", refuse)
+            recovered = browser.context_for("/home/noon_seller_profile", self.capture("PRJ1"))
+        self.assertEqual(recovered, {"headers": {"x-project": "PRJ1"}, "body": {"noon_store_code": "STR1-NAE"}})
+
+
+class BorrowedBrowser:
+    """A SellerBrowser that hands out a stub page, so a catalog can be opened without starting Chrome."""
+
+    def __init__(self):
+        self.asked_for = []
+        self.closed = False
+        self._context_of = {}
+
+    def page_for(self, profile):
+        self.asked_for.append(profile)
+        return FakeContext(profile), f"page for {profile}"
+
+    def context_for(self, profile, capture):
+        if profile not in self._context_of:
+            self._context_of[profile] = capture()
+        return self._context_of[profile]
+
+    def close(self):
+        self.closed = True
+
+
+class CatalogReusingAContextTests(unittest.TestCase):
+    """A second store of an account is read with the context its first store captured.
+
+    Opening the catalog is about six seconds of a seven-second read, and every store of an account was
+    paying it to capture the same thing. Only the project differs, and the catalog swaps that in itself.
+    """
+
+    def setUp(self):
+        from noon_store.adapters.noon_seller_api import NoonSellerApiCatalog
+
+        self.loads = []
+        test = self
+
+        class Catalog(NoonSellerApiCatalog):
+            """The real catalog, with only the page load that talks to noon stubbed out."""
+
+            def _load_context(self):
+                # What _open_catalog gets off the page: the FIRST store's project and store code.
+                test.loads.append(_project(self.store))
+                return {"headers": {"x-project": "PRJ82799", "accept": "application/json"},
+                        "body": {"noon_store_code": "STR82799-NAE", "per_page": 100, "filters": {}}}
+
+            def _name_of_store(self):
+                return "Test Store"
+
+        self.Catalog = Catalog
+        self.browser = BorrowedBrowser()
+        self.home = tempfile.TemporaryDirectory()
+        os.makedirs(os.path.join(self.home.name, "noon_seller_profile"), exist_ok=True)
+        self._saved = os.environ.get("NOON_PROFILE")
+        os.environ["NOON_PROFILE"] = os.path.join(self.home.name, "noon_seller_profile")
+
+    def tearDown(self):
+        if self._saved is None:
+            os.environ.pop("NOON_PROFILE", None)
+        else:
+            os.environ["NOON_PROFILE"] = self._saved
+        self.home.cleanup()
+
+    def store(self, path):
+        return StoreRef.parse(f"https://www.noon.com/uae-en/{path}/")
+
+    def test_the_second_store_of_an_account_does_not_open_the_catalog_again(self):
+        with self.Catalog(self.store("p-82799"), browser=self.browser):
+            pass
+        with self.Catalog(self.store("p-19740"), browser=self.browser):
+            pass
+        self.assertEqual(len(self.loads), 1,
+                         "the second store must reuse the account's captured context, not spend six seconds "
+                         "capturing the same thing again")
+
+    def test_the_second_store_is_read_as_itself_not_as_the_store_that_captured(self):
+        # The captured context names the first store. Reading the second with it unchanged would quietly
+        # return the first store's products under the second store's name.
+        with self.Catalog(self.store("p-19740"), browser=self.browser) as catalog:
+            self.assertEqual(catalog._headers["x-project"], "PRJ19740")
+            self.assertEqual(catalog._base_body["noon_store_code"], _store_code(self.store("p-19740")))
+
+    def test_the_rest_of_the_captured_context_is_kept(self):
+        with self.Catalog(self.store("p-19740"), browser=self.browser) as catalog:
+            self.assertEqual(catalog._headers["accept"], "application/json")
+            self.assertEqual(catalog._base_body["per_page"], 100)
+
+    def test_one_store_s_context_is_not_handed_to_another_account(self):
+        second = BorrowedBrowser()
+        with self.Catalog(self.store("p-82799"), browser=self.browser):
+            pass
+        with self.Catalog(self.store("p-19740"), browser=second):
+            pass
+        self.assertEqual(len(self.loads), 2, "a second account must capture its own context")
+
+
+class KnownStoreNameTests(unittest.TestCase):
+    """A store whose name is already known is not asked for it again.
+
+    The name costs a request of about a second per store, and Load Stores has already read and saved it --
+    asking noon again to learn what the account just told us is a second spent per store to learn nothing.
+    """
+
+    def setUp(self):
+        from noon_store.adapters.noon_seller_api import NoonSellerApiCatalog
+
+        self.asked = []
+        test = self
+
+        class Catalog(NoonSellerApiCatalog):
+            """The real catalog with only the two steps that talk to noon stubbed out."""
+
+            def _load_context(self):
+                return {"headers": {"x-project": "PRJ19740"},
+                        "body": {"noon_store_code": "STR19740-NAE", "filters": {}}}
+
+            def _name_of_store(self):
+                test.asked.append(_project(self.store))
+                return "The Name noon Gave"
+
+        self.Catalog = Catalog
+        self.browser = BorrowedBrowser()
+        self.home = tempfile.TemporaryDirectory()
+        os.makedirs(os.path.join(self.home.name, "noon_seller_profile"), exist_ok=True)
+        self._saved = os.environ.get("NOON_PROFILE")
+        os.environ["NOON_PROFILE"] = os.path.join(self.home.name, "noon_seller_profile")
+
+    def tearDown(self):
+        if self._saved is None:
+            os.environ.pop("NOON_PROFILE", None)
+        else:
+            os.environ["NOON_PROFILE"] = self._saved
+        self.home.cleanup()
+
+    def store(self):
+        return StoreRef.parse("https://www.noon.com/uae-en/p-19740/")
+
+    def test_a_catalog_given_the_name_does_not_ask_noon_for_it(self):
+        with self.Catalog(self.store(), browser=self.browser, name="TIGER") as catalog:
+            self.assertEqual(catalog.store_name, "TIGER")
+        self.assertEqual(self.asked, [], "the name was already known, so noon must not be asked for it")
+
+    def test_a_catalog_given_no_name_still_asks(self):
+        # Nothing saved for this store yet -- a fetch of a store the box has never listed must still work.
+        with self.Catalog(self.store(), browser=self.browser) as catalog:
+            self.assertEqual(catalog.store_name, "The Name noon Gave")
+        self.assertEqual(len(self.asked), 1)
+
+    def test_a_blank_name_is_not_taken_as_an_answer(self):
+        # An empty label is missing information, not a store called "". Asking is what gets a real name.
+        with self.Catalog(self.store(), browser=self.browser, name="") as catalog:
+            self.assertEqual(catalog.store_name, "The Name noon Gave")
+        self.assertEqual(len(self.asked), 1)
+
+
+class CatalogSharingABrowserTests(unittest.TestCase):
+    """A store read through a browser the caller already has open, rather than one of its own."""
+
+    def setUp(self):
+        from noon_store.adapters.noon_seller_api import NoonSellerApiCatalog
+
+        class Catalog(NoonSellerApiCatalog):
+            """The real catalog with only the two steps that talk to noon stubbed out."""
+
+            def _open_catalog(self):
+                self._headers = {"x-project": "PRJ19740"}
+                self._base_body = {"noon_store_code": "STR19740-NAE"}
+                self._base_filters = {}
+
+            def _name_of_store(self):
+                return "Test Store"
+
+        self.Catalog = Catalog
+        self.browser = BorrowedBrowser()
+        self.home = tempfile.TemporaryDirectory()
+        os.makedirs(os.path.join(self.home.name, "noon_seller_profile"), exist_ok=True)
+        self._saved = os.environ.get("NOON_PROFILE")
+        os.environ["NOON_PROFILE"] = os.path.join(self.home.name, "noon_seller_profile")
+
+    def tearDown(self):
+        if self._saved is None:
+            os.environ.pop("NOON_PROFILE", None)
+        else:
+            os.environ["NOON_PROFILE"] = self._saved
+        self.home.cleanup()
+
+    def store(self):
+        return StoreRef.parse("https://www.noon.com/uae-en/p-19740/")
+
+    def test_a_catalog_given_a_browser_reads_through_it_instead_of_starting_one(self):
+        with self.Catalog(self.store(), browser=self.browser) as catalog:
+            self.assertEqual(catalog.store_name, "Test Store")
+        self.assertEqual(len(self.browser.asked_for), 1,
+                         "the catalog must read through the browser it was given")
+
+    def test_a_catalog_leaves_a_borrowed_browser_open_for_the_next_store(self):
+        # The caller owns the browser: closing it here would cost the next store the launch all over again.
+        with self.Catalog(self.store(), browser=self.browser):
+            pass
+        self.assertFalse(self.browser.closed,
+                         "a borrowed browser must outlive the store that borrowed it")
+
+    def test_a_borrowed_catalog_still_forgets_the_context_it_captured(self):
+        with self.Catalog(self.store(), browser=self.browser) as catalog:
+            self.assertTrue(catalog._headers)
+        self.assertEqual(catalog._headers, {},
+                         "the captured headers must not outlive the fetch that captured them")
+
+
 if __name__ == "__main__":
     unittest.main()

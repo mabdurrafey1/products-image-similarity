@@ -264,7 +264,7 @@ class SearchTab(ttk.Frame):
         source_hint.pack(side="left")
 
         # Re-read input_data, for files added or fetched outside this window
-        self.refresh_files_btn = ttk.Button(hint_row, text="Refresh Files", command=self.refresh_excel_list)
+        self.refresh_files_btn = ttk.Button(hint_row, text="↻ Refresh Files", command=self.refresh_excel_list)
         self.refresh_files_btn.pack(side="right")
 
         # Fetch a public noon store into input_data, or add the new arrivals of fetched stores
@@ -274,28 +274,24 @@ class SearchTab(ttk.Frame):
         store_lbl = ttk.Label(store_row, text="Noon store:")
         store_lbl.pack(side="left", padx=(0, 5))
 
-        # The stores come from the signed-in Seller Center account, not from a pasted link
+        # The stores come from the signed-in Seller Center account, not from a pasted link. Choosing one
+        # is a dialog of its own: a flat box of every store of every account said nothing about which
+        # account a store came from, and the row had grown to five controls.
         self.store_choices = _saved_store_choices()
         self.store_url_var = tk.StringVar()
-        self.store_box = ttk.Combobox(store_row, textvariable=self.store_url_var,
-                                      values=list(self.store_choices), state="readonly")
-        self.store_box.pack(side="left", fill="x", expand=True, padx=(0, 5))
         self._select_store(load_config().get("noon_store_url", ""))
 
-        self.load_stores_btn = ttk.Button(store_row, text="Load Stores", command=self.start_load_stores)
-        self.load_stores_btn.pack(side="left", padx=(0, 5))
+        self.chosen_store_lbl = ttk.Label(store_row, textvariable=self.store_url_var, anchor="w",
+                                          foreground="#333333")
+        self.chosen_store_lbl.pack(side="left", fill="x", expand=True, padx=(0, 5))
+
+        self.stores_btn = ttk.Button(store_row, text="Stores…", command=self.open_stores)
+        self.stores_btn.pack(side="left", padx=(0, 5))
 
         # Each account signs into a Chrome profile of its own; the dialog adds, re-signs and removes them
         self.accounts_btn = ttk.Button(store_row, text="Accounts", command=self.open_accounts)
-        self.accounts_btn.pack(side="left", padx=(0, 5))
+        self.accounts_btn.pack(side="left")
 
-        self.fetch_store_btn = ttk.Button(store_row, text="Fetch Store", command=self.start_fetch_store)
-        self.fetch_store_btn.pack(side="left")
-
-        # Refresh adds the new arrivals of every fetched store
-        self.refresh_btn = ttk.Button(form_card, text="Refresh", command=self.start_refresh_listing)
-        self.refresh_btn.grid(row=2, column=2, padx=10, pady=10, sticky="nw")
-        
         # 3. Global Images Directory Row
         config = load_config()
         default_image_dir = config.get("image_dir", get_default_global_image_dir())
@@ -846,9 +842,27 @@ class SearchTab(ttk.Frame):
     def _enable_store_box(self, enabled):
         """Let the store be changed, or don't, while something is reading one.
 
-        Readonly is the box's resting state and it never goes back to "normal": a normal combobox takes
-        typed text, and a typed store is in no dict, so the link lookup would quietly come back empty."""
-        self.store_box.config(state="readonly" if enabled else "disabled")
+        The controls live in the Stores dialog now and are destroyed with it, so most of the time
+        there are none to speak of -- and one that outlived its window raises if it is configured."""
+        if getattr(self, "_stores_window", None) is None:
+            return
+        for widget in getattr(self, "_stores_widgets", []):
+            if widget.winfo_exists():
+                widget.config(state="normal" if enabled else "disabled")
+
+    def _enable_account_controls(self, enabled):
+        """The Accounts dialog's controls, which are destroyed with it and often aren't there at all."""
+        if getattr(self, "_accounts_window", None) is None:
+            return
+        for widget in getattr(self, "_accounts_widgets", []):
+            if widget.winfo_exists():
+                widget.config(state="normal" if enabled else "disabled")
+
+    def _redraw_stores(self):
+        """Show the chosen store on the row, and redraw the dialog if it happens to be open."""
+        self._select_store(self.selected_store_link())
+        if getattr(self, "_stores_window", None) is not None:
+            self._fill_stores()
 
     def _select_store(self, url):
         """Show the store with this link, or the first one the account offers."""
@@ -865,7 +879,6 @@ class SearchTab(ttk.Frame):
         """Read the stores of the signed-in noon Seller Center account into the store box."""
         if self.is_running:
             return
-        self.load_stores_btn.config(state="disabled")
         self._enable_store_box(False)
         self._store_log("Reading the stores of your noon accounts...")
         threading.Thread(target=self._load_stores, daemon=True).start()
@@ -880,7 +893,6 @@ class SearchTab(ttk.Frame):
         self.main_app.root.after(0, self._stores_loaded, choices, error)
 
     def _stores_loaded(self, choices, error):
-        self.load_stores_btn.config(state="normal")
         self._enable_store_box(True)
         if error:
             self._store_log(f"[ERROR] The stores couldn't be read: {error}")
@@ -888,8 +900,8 @@ class SearchTab(ttk.Frame):
             return
         chosen = self.selected_store_link()
         self.store_choices = choices
-        self.store_box.config(values=list(choices))
         self._select_store(chosen)
+        self._redraw_stores()
         config = load_config()
         config["noon_stores"] = [{"label": label, "url": link} for label, link in choices.items()]
         save_config(config)
@@ -908,7 +920,6 @@ class SearchTab(ttk.Frame):
                 "Its stores join the list as soon as you are in."):
             return
         self.accounts_btn.config(state="disabled")
-        self.load_stores_btn.config(state="disabled")
         self._enable_store_box(False)
         self._store_log("Opening a window to sign into the new noon account...")
         threading.Thread(target=self._add_account, daemon=True).start()
@@ -924,7 +935,6 @@ class SearchTab(ttk.Frame):
 
     def _account_added(self, added, error):
         self.accounts_btn.config(state="normal")
-        self.load_stores_btn.config(state="normal")
         self._enable_store_box(True)
         if error:
             self._store_log(f"[ERROR] The account wasn't added: {error}")
@@ -934,14 +944,115 @@ class SearchTab(ttk.Frame):
         # The box offers stores, not accounts: the new account's join the ones already there, by name
         self.store_choices = dict(sorted({**self.store_choices, **added}.items(),
                                          key=lambda choice: choice[0].lower()))
-        self.store_box.config(values=list(self.store_choices))
         self._select_store(chosen)
+        self._redraw_stores()
         config = load_config()
         config["noon_stores"] = [{"label": label, "url": link}
                                  for label, link in self.store_choices.items()]
         save_config(config)
         self._store_log(f"Account added: {len(added)} more stores to choose from.")
         self._log_accounts()
+
+    def open_stores(self):
+        """Choose the store to work on, shown under the account it belongs to."""
+        if self.is_running:
+            return
+        if getattr(self, "_stores_window", None) is not None:
+            self._stores_window.lift()
+            return
+        window = tk.Toplevel(self.main_app.root)
+        self._stores_window = window
+        window.title("noon Stores")
+        window.transient(self.main_app.root)
+        window.resizable(False, False)
+        window.protocol("WM_DELETE_WINDOW", self._close_stores)
+
+        self._stores_body = ttk.Frame(window, padding=12)
+        self._stores_body.pack(fill="both", expand=True)
+        self._fill_stores()
+
+        # Centred on the main window, a little above the middle, where a dialog is looked for
+        window.update_idletasks()
+        root = self.main_app.root
+        x = root.winfo_x() + (root.winfo_width() - window.winfo_width()) // 2
+        y = root.winfo_y() + (root.winfo_height() - window.winfo_height()) // 3
+        window.geometry(f"+{max(0, x)}+{max(0, y)}")
+        # No grab: the dialog stays open while a fetch runs, and a grabbing window would swallow the
+        # clicks meant for the log and the Stop button underneath it.
+
+        # The stores were read once and written down, and reading them again costs a Chrome launch per
+        # account to be told the same thing. They are asked for only when nothing was ever written
+        # down -- after that it takes Reload, or noon turning us away, to ask again.
+        if not self.store_choices and not getattr(self, "_stores_auto_loaded", False):
+            self._stores_auto_loaded = True
+            self.start_load_stores()
+
+    def _close_stores(self):
+        window, self._stores_window = getattr(self, "_stores_window", None), None
+        self._stores_widgets = []
+        if window is not None:
+            window.destroy()
+
+    def _fill_stores(self):
+        """Draw the stores, grouped under their accounts. Drawn again whenever the stores change."""
+        import noon_seller_stores          # imported here: the GUI starts without playwright
+
+        for child in self._stores_body.winfo_children():
+            child.destroy()
+        self._stores_widgets = []
+        views, orphans = noon_seller_stores.account_overview(self.store_choices)
+
+        ttk.Label(self._stores_body, font=("Segoe UI", 9, "italic"), wraplength=560,
+                  text="These are the stores your accounts were read to hold. Reload only if they have "
+                       "changed. Refresh adds the new arrivals of every store already fetched."
+                  ).pack(anchor="w", pady=(0, 10))
+
+        if not any(view.stores for view in views):
+            ttk.Label(self._stores_body, text="No stores yet — Load Stores reads them from your "
+                                              "accounts.").pack(anchor="w")
+
+        for view in views:
+            if not view.stores:
+                continue
+            ttk.Label(self._stores_body, text=view.title,
+                      font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(8, 2))
+            for label, _ in view.stores:
+                # The link is looked up by label, so the label is what the choice carries
+                button = ttk.Radiobutton(self._stores_body, text=label, value=label,
+                                         variable=self.store_url_var)
+                button.pack(anchor="w", padx=(14, 0))
+                self._stores_widgets.append(button)
+
+        if orphans:
+            # Saved with a store box from an account since removed: nothing can fetch these
+            ttk.Label(self._stores_body, font=("Segoe UI", 8), foreground="#b06000", wraplength=560,
+                      text=f"{len(orphans)} store(s) belong to no account here and cannot be fetched: "
+                           f"{', '.join(orphans)}").pack(anchor="w", pady=(10, 0))
+
+        footer = ttk.Frame(self._stores_body)
+        footer.pack(fill="x", pady=(14, 0))
+        load = ttk.Button(footer, text="↻ Reload from noon", command=self._load_from_dialog)
+        load.pack(side="left")
+        fetch = ttk.Button(footer, text="Fetch Store", command=self._fetch_from_dialog)
+        fetch.pack(side="left", padx=(5, 0))
+        refresh = ttk.Button(footer, text="↻ Refresh", command=self._refresh_from_dialog)
+        refresh.pack(side="left", padx=(5, 0))
+        self._stores_widgets += [load, fetch, refresh]
+        ttk.Button(footer, text="Close", command=self._close_stores).pack(side="right")
+
+        # Drawn again whenever the stores change, which can happen while a task is still running:
+        # freshly built controls start enabled, and would offer to start a second one.
+        self._enable_store_box(not self.is_running)
+
+    def _load_from_dialog(self):
+        """The dialog stays open while the work runs: its controls go dead, not the window itself."""
+        self.start_load_stores()
+
+    def _fetch_from_dialog(self):
+        self.start_fetch_store()
+
+    def _refresh_from_dialog(self):
+        self.start_refresh_listing()
 
     def open_accounts(self):
         """Show the noon accounts: what each holds, and how to add, re-sign or remove one."""
@@ -967,12 +1078,13 @@ class SearchTab(ttk.Frame):
         x = root.winfo_x() + (root.winfo_width() - window.winfo_width()) // 2
         y = root.winfo_y() + (root.winfo_height() - window.winfo_height()) // 3
         window.geometry(f"+{max(0, x)}+{max(0, y)}")
-        window.grab_set()
+        # No grab: a sign-in runs for minutes with the dialog still up, and a grabbing window would
+        # swallow the clicks meant for the log and the Stop button underneath it.
 
     def _close_accounts(self):
         window, self._accounts_window = getattr(self, "_accounts_window", None), None
+        self._accounts_widgets = []
         if window is not None:
-            window.grab_release()
             window.destroy()
 
     def _fill_accounts(self):
@@ -981,6 +1093,7 @@ class SearchTab(ttk.Frame):
 
         for child in self._accounts_body.winfo_children():
             child.destroy()
+        self._accounts_widgets = []
         views, orphans = noon_seller_stores.account_overview(self.store_choices)
 
         ttk.Label(self._accounts_body, font=("Segoe UI", 9, "italic"),
@@ -997,10 +1110,13 @@ class SearchTab(ttk.Frame):
             ttk.Label(row, text=view.title, width=42, anchor="w").pack(side="left")
             ttk.Label(row, text=view.status, width=14, anchor="w",
                       font=("Segoe UI", 9)).pack(side="left")
-            ttk.Button(row, text="Remove", width=9,
-                       command=lambda v=view: self._remove_account(v)).pack(side="right", padx=(5, 0))
-            ttk.Button(row, text="Sign in again", width=13,
-                       command=lambda v=view: self._sign_in_again(v)).pack(side="right")
+            remove = ttk.Button(row, text="Remove", width=9,
+                                command=lambda v=view: self._remove_account(v))
+            remove.pack(side="right", padx=(5, 0))
+            again = ttk.Button(row, text="Sign in again", width=13,
+                               command=lambda v=view: self._sign_in_again(v))
+            again.pack(side="right")
+            self._accounts_widgets += [remove, again]
 
         if orphans:
             # Saved with a store box from an account since removed: nothing can fetch these
@@ -1010,18 +1126,24 @@ class SearchTab(ttk.Frame):
 
         footer = ttk.Frame(self._accounts_body)
         footer.pack(fill="x", pady=(14, 0))
-        ttk.Button(footer, text="Add Account", command=self._add_from_dialog).pack(side="left")
+        add = ttk.Button(footer, text="Add Account", command=self._add_from_dialog)
+        add.pack(side="left")
+        self._accounts_widgets.append(add)
         ttk.Button(footer, text="Close", command=self._close_accounts).pack(side="right")
 
+        # Drawn again whenever the accounts change, which can happen while a task is still running:
+        # freshly built controls start enabled, and would offer to start a second one.
+        self._enable_account_controls(not self.is_running)
+
     def _add_from_dialog(self):
-        """The sign-in takes minutes and runs against the main window, so the dialog steps aside."""
-        self._close_accounts()
+        """The dialog stays open while the sign-in runs: its controls go dead, not the window itself."""
         self.start_add_account()
 
     def _sign_in_again(self, view):
-        self._close_accounts()
+        if self.is_running:
+            return
         self.accounts_btn.config(state="disabled")
-        self.load_stores_btn.config(state="disabled")
+        self._enable_account_controls(False)
         self._store_log(f"Opening a window to sign into {view.title}...")
         threading.Thread(target=self._do_sign_in, args=(view.profile,), daemon=True).start()
 
@@ -1048,8 +1170,7 @@ class SearchTab(ttk.Frame):
         noon_seller_stores.remove_account(view.profile)
         for label, _ in view.stores:
             self.store_choices.pop(label, None)
-        self.store_box.config(values=list(self.store_choices))
-        self._select_store(self.selected_store_link())
+        self._redraw_stores()
         config = load_config()
         config["noon_stores"] = [{"label": label, "url": link}
                                  for label, link in self.store_choices.items()]
@@ -1073,9 +1194,10 @@ class SearchTab(ttk.Frame):
         self.is_running = True
         self.stop_event = threading.Event()
         self.main_app.notebook.tab(self, text=f"Search Tab #{self.tab_id} ⏳")
-        for button in (self.run_btn, self.fetch_store_btn, self.refresh_btn, self.load_stores_btn,
+        for button in (self.run_btn, self.stores_btn,
                        self.accounts_btn, self.refresh_files_btn):
             button.config(state="disabled")
+        # The dialog is left standing so its log can be watched, but nothing in it can be started twice
         self._enable_store_box(False)
         self.stop_btn.config(state="normal")
         self.progress.config(mode="indeterminate")
@@ -1118,23 +1240,25 @@ class SearchTab(ttk.Frame):
         self.status_var.set(f"Fetching store products: {done:,} of {total:,}")
 
     def _refresh_listings(self, paths):
-        refreshed, added = [], 0
+        listings = []
         for path in paths:
-            if not noon_store.is_listing(path):
+            if noon_store.is_listing(path):
+                listings.append(path)
+            else:
                 print(f"Skipping '{os.path.basename(path)}': it wasn't made by Fetch Store.")
-                continue
-            result = noon_store.refresh_store(path, should_stop=self.stop_event.is_set)
-            refreshed.append(path)
-            added += result.added
-        if not refreshed:
+        if not listings:
             raise noon_store.StoreError("None of the selected files is a noon store. Use Fetch Store to add one first.")
+        # Every store goes through one browser: starting it is almost the whole cost of a refresh.
+        results = noon_store.refresh_stores(listings, should_stop=self.stop_event.is_set)
+        refreshed = [result.location for result in results]
+        added = sum(result.added for result in results)
         return f"Added {added:,} new products to {len(refreshed)} store listing(s).", refreshed
 
     def _on_store_task_done(self, outcome, message, paths):
         self.progress.stop()
         self._stop_clock()
         self.progress.config(mode="indeterminate", maximum=100, value=0)  # searches report progress out of 100
-        for button in (self.run_btn, self.fetch_store_btn, self.refresh_btn, self.load_stores_btn,
+        for button in (self.run_btn, self.stores_btn,
                        self.accounts_btn, self.refresh_files_btn):
             button.config(state="normal")
         self._enable_store_box(True)

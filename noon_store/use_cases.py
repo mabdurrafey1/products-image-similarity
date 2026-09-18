@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
-from typing import Callable, Iterable, Optional, Sequence
+from typing import Callable, ContextManager, Iterable, Optional, Sequence
 
 from .domain import CatalogPage, CatalogQuery, Product, StopRequested, StoreError, StoreListing, StoreRef, subcategories
 from .ports import CatalogGateway, ListingRepository, OpenCatalog
@@ -283,7 +283,8 @@ class RefreshStore(_StoreUseCase):
     def execute(self, location: str) -> RefreshResult:
         listing = self.repository.load(location)
         self.log(f"Checking '{listing.name}' for new arrivals ({len(listing.products):,} products saved)...")
-        with self.open_catalog(listing.store) as catalog:
+        # The listing already says what the store is called, so noon needn't be asked all over again.
+        with self.open_catalog(listing.store, listing.name) as catalog:
             crawler = _Crawler(catalog, self.log, self.should_stop, known=listing.skus())
             crawler.new_arrivals()
 
@@ -291,3 +292,35 @@ class RefreshStore(_StoreUseCase):
         self.repository.save(listing, location)
         self.log(f"Added {len(added):,} new products to '{listing.name}' ({len(listing.products):,} total).")
         return RefreshResult(location, listing.name, len(added), len(listing.products))
+
+
+class RefreshStores(_StoreUseCase):
+    """Add the new arrivals of several saved listings, reading them all through one browser.
+
+    Starting the browser is almost the whole cost of a refresh -- about twelve seconds against under two
+    for the requests themselves -- so refreshing seven stores one at a time paid for seven starts. Here the
+    browser is opened once and every listing read through it.
+    """
+
+    def __init__(self, open_session: Callable[[], ContextManager[OpenCatalog]],
+                 repository: ListingRepository, log: Callable[[str], None] = print,
+                 on_progress: Optional[Callable[[int, int], None]] = None,
+                 should_stop: Optional[Callable[[], bool]] = None,
+                 clock: Callable[[], datetime] = datetime.now):
+        # Each store's catalog comes from the session, so there is no opener of its own to hold.
+        super().__init__(None, repository, log, on_progress, should_stop, clock)
+        self.open_session = open_session
+
+    def execute(self, locations: Sequence[str]) -> list[RefreshResult]:
+        results: list[RefreshResult] = []
+        with self.open_session() as open_catalog:
+            for location in locations:
+                try:
+                    results.append(RefreshStore(open_catalog, self.repository, self.log, self.on_progress,
+                                                self.should_stop, self.clock).execute(location))
+                except StoreError as e:
+                    # One listing that cannot be read must not cost the stores after it their refresh, nor
+                    # throw away the browser they were about to share. A stop request is not caught: the
+                    # person asked for the whole run to end, not for this store to be skipped.
+                    self.log(f"Skipped {location}: {e}")
+        return results

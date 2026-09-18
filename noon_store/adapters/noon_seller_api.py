@@ -327,20 +327,112 @@ def _brand_groups(buckets: list, cap: int) -> list[list[str]]:
     return groups
 
 
+class SellerBrowser:
+    """One Chrome per signed-in account, shared by every store read through that account.
+
+    Starting Chrome is almost the whole cost of reading a store: the requests themselves take under two
+    seconds, the launch about twelve. A caller that reads several stores holds one of these for the whole
+    run, so each account's browser is started once and every one of its stores is read through the page
+    that is already signed in. A profile is one cookie jar, so accounts still get a browser each.
+    """
+
+    def __init__(self, launch: Optional[Callable[[str], tuple]] = None):
+        self._launch = launch or self._start_chrome
+        self._open: dict[str, tuple] = {}
+        self._context_of: dict[str, dict] = {}
+        self._playwright = None
+
+    def __enter__(self) -> "SellerBrowser":
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.close()
+
+    def page_for(self, profile: str) -> tuple:
+        """The signed-in context and page for this profile, starting Chrome only the first time."""
+        if profile not in self._open:
+            self._open[profile] = self._launch(profile)
+        return self._open[profile]
+
+    def context_for(self, profile: str, capture: Callable[[], dict]) -> dict:
+        """The headers and body template this account's stores send, captured only the first time.
+
+        Opening the catalog to capture them costs about six seconds, and the only thing that differs
+        between two stores of one account is the project the headers name -- which the caller swaps in
+        for itself. So the account captures once and every store after the first is read at once.
+        """
+        if profile not in self._context_of:
+            # Stored only once the capture has worked: a failed one must not leave the stores after it
+            # holding an empty context, which would fail the whole account rather than the one store.
+            self._context_of[profile] = capture()
+        return self._context_of[profile]
+
+    def _start_chrome(self, profile: str) -> tuple:
+        from playwright.sync_api import sync_playwright
+
+        if not os.path.isdir(profile) or not os.listdir(profile):
+            raise StoreError("No noon Seller Center session yet. Use Load Stores to sign in once, "
+                             "then fetch the store again.")
+        if self._playwright is None:
+            self._playwright = sync_playwright().start()
+        headed = bool(os.environ.get(HEADED_ENV))
+        try:
+            # A real browser, off the edge of the screen -- see the note at the top on why not headless.
+            context = self._playwright.chromium.launch_persistent_context(
+                user_data_dir=profile, channel="chrome", headless=False, viewport=None,
+                args=["--start-maximized"] if headed else OFFSCREEN)
+        except Exception as e:
+            # Chrome refuses a profile a second browser already has, rather than share it.
+            if "ProcessSingleton" in str(e) or "SingletonLock" in str(e):
+                raise StoreError("A noon fetch is already running. Wait for it to finish and try again "
+                                 "-- two at once would corrupt the signed-in profile.") from e
+            raise
+        page = context.pages[0] if context.pages else context.new_page()
+        if not headed:
+            # macOS ignores --window-position, so an unwanted window has to be minimised to go away
+            hide_window(page)
+        return context, page
+
+    def close(self) -> None:
+        """Let go of every browser, so each profile keeps the session it was holding.
+
+        Chrome writes the session back to the profile only on a clean exit, so one browser that refuses
+        to close must not strand the rest -- that would cost those accounts their sign-in."""
+        try:
+            for context, _ in self._open.values():
+                try:
+                    context.close()
+                except Exception:
+                    pass
+            self._open.clear()
+        finally:
+            if self._playwright:
+                self._playwright.stop()
+                self._playwright = None
+
+
 class NoonSellerApiCatalog:
     """CatalogGateway reading one store from the signed-in Seller Center account.
 
-    Use it as a context manager; the browser closes, keeping its session, on exit.
+    Use it as a context manager. Given a `browser`, it reads the store through that -- the caller owns it
+    and every other store it reads shares the one Chrome. Given none, it opens a browser of its own and
+    closes it, keeping the session, on exit.
     """
     page_size = PAGE_SIZE
     max_pages = MAX_PAGES
     batch_size = BATCH_SIZE
 
-    def __init__(self, store: StoreRef, log: Optional[Callable[[str], None]] = None):
+    def __init__(self, store: StoreRef, log: Optional[Callable[[str], None]] = None,
+                 browser: Optional[SellerBrowser] = None, name: str = ""):
         self.store = store
         self.log = log or (lambda message: None)
+        # The name the account already gave for this store, if the caller has it: asking noon again costs
+        # about a second per store to learn what Load Stores has already read and saved.
+        self.known_name = name
         self.store_name = ""
-        self._playwright = self._context = self._page = None
+        self._browser = browser        # the caller's, to be left open
+        self._own_browser = None       # this store's own, to be closed with it
+        self._context = self._page = None
         self._concurrency = CONCURRENCY
         self._gap = GAP
         self._throttled = False   # whether the fast allowance has already been reported as spent
@@ -349,34 +441,16 @@ class NoonSellerApiCatalog:
         self._base_filters: dict = {}
 
     def __enter__(self) -> "NoonSellerApiCatalog":
-        from playwright.sync_api import sync_playwright
-
         profile = _fetch_profile(self.store, os.environ.get(PROFILE_DIR_ENV, ""))
-        if not os.path.isdir(profile) or not os.listdir(profile):
-            raise StoreError("No noon Seller Center session yet. Use Load Stores to sign in once, "
-                             "then fetch the store again.")
-        self._playwright = sync_playwright().start()
+        # Either the caller's browser, shared with every other store it reads, or one just for this store.
+        # Going through a SellerBrowser either way keeps starting Chrome in one place.
+        self._own_browser = None if self._browser else SellerBrowser()
+        browser = self._browser or self._own_browser
         try:
-            headed = bool(os.environ.get(HEADED_ENV))
-            try:
-                # A real browser, off the edge of the screen -- see the note at the top on why not headless.
-                # The window still lays the catalog out, which is what makes the app send the request read here.
-                self._context = self._playwright.chromium.launch_persistent_context(
-                    user_data_dir=profile, channel="chrome", headless=False, viewport=None,
-                    args=["--start-maximized"] if headed else OFFSCREEN)
-            except Exception as e:
-                # Chrome refuses a profile a second browser already has, rather than share it. Since a fetch
-                # is now invisible, saying so plainly is the only way to tell one is already under way.
-                if "ProcessSingleton" in str(e) or "SingletonLock" in str(e):
-                    raise StoreError("A noon fetch is already running. Wait for it to finish and try again "
-                                     "-- two at once would corrupt the signed-in profile.") from e
-                raise
-            self._page = self._context.pages[0] if self._context.pages else self._context.new_page()
-            if not headed:
-                # macOS ignores --window-position, so an unwanted window has to be minimised to go away
-                hide_window(self._page)
+            self._context, self._page = browser.page_for(profile)
             self._open_catalog()
-            self.store_name = self._name_of_store()
+            # Asked for only when nobody could tell us: a blank name is missing information, not an answer.
+            self.store_name = self.known_name or self._name_of_store()
         except BaseException:
             self.__exit__()
             raise
@@ -384,14 +458,12 @@ class NoonSellerApiCatalog:
 
     def __exit__(self, *exc_info) -> None:
         self._headers.clear()   # drop the captured context as soon as it is done with
-        try:
-            if self._context:
-                self._context.close()   # clean exit, so the profile keeps the session for next time
-        except Exception:
-            pass
-        finally:
-            if self._playwright:
-                self._playwright.stop()
+        self._context = self._page = None
+        # A borrowed browser belongs to the caller and stays open for the next store; only one opened
+        # for this store alone is closed here, which is what lets its profile keep the session.
+        if self._own_browser:
+            self._own_browser.close()
+            self._own_browser = None
 
     def fetch_pages(self, queries: Sequence[CatalogQuery]) -> list[CatalogPage]:
         """The page for each query. The requests are made concurrently from inside the page."""
@@ -465,6 +537,21 @@ class NoonSellerApiCatalog:
             raise StoreError(f"The Seller Center page stopped answering ({_first_line(e)}). Try again.") from e
 
     def _open_catalog(self) -> None:
+        """Give this store the context its account's stores send, capturing it if nobody has yet.
+
+        Capturing costs about six seconds and every store of an account used to pay it, though the only
+        thing that differs between them is the project -- which is swapped in here. The account captures
+        once; every store after the first starts reading at once.
+        """
+        profile = _fetch_profile(self.store, os.environ.get(PROFILE_DIR_ENV, ""))
+        captured = (self._browser or self._own_browser).context_for(profile, self._load_context)
+
+        self._headers = {**captured["headers"], "x-project": _project(self.store)}
+        self._base_body = dict(captured["body"])
+        self._base_body["noon_store_code"] = _store_code(self.store)   # the store asked for, not the page's own
+        self._base_filters = dict(self._base_body.get("filters") or {})
+
+    def _load_context(self) -> dict:
         """Open the account's catalog and capture the context its own requests carry."""
         captured: dict = {}
 
@@ -490,21 +577,23 @@ class NoonSellerApiCatalog:
             while "headers" not in captured and self._page.evaluate("Date.now()") < deadline:
                 self._page.wait_for_timeout(500)
 
-        load()
-        if "login" in self._page.url:
-            raise StoreError("The noon Seller Center session has expired. Use Load Stores to sign in again.")
-        if "headers" not in captured:
-            # The catalog is a single-page app and now and then it just doesn't start -- seen on the first
-            # fetch after another browser had only moments earlier let go of the profile. A second load costs
-            # seconds; giving up throws away the whole store for a slow boot.
+        try:
             load()
-        if "headers" not in captured:
-            raise StoreError("Seller Center didn't load its catalog, so the store couldn't be read.")
+            if "login" in self._page.url:
+                raise StoreError("The noon Seller Center session has expired. Use Load Stores to sign in again.")
+            if "headers" not in captured:
+                # The catalog is a single-page app and now and then it just doesn't start -- seen on the first
+                # fetch after another browser had only moments earlier let go of the profile. A second load
+                # costs seconds; giving up throws away the whole store for a slow boot.
+                load()
+            if "headers" not in captured:
+                raise StoreError("Seller Center didn't load its catalog, so the store couldn't be read.")
+        finally:
+            # The page outlives this store now that a whole account shares one, so the listener has to go
+            # with the store that added it -- left on, every later store would add another.
+            self._page.remove_listener("request", on_request)
 
-        self._headers = captured["headers"]
-        self._base_body = dict(captured["body"])
-        self._base_body["noon_store_code"] = _store_code(self.store)   # the store asked for, not the page's own
-        self._base_filters = dict(self._base_body.get("filters") or {})
+        return {"headers": captured["headers"], "body": captured["body"]}
 
     def _name_of_store(self) -> str:
         """The account's own name for this store, used for the listing's file name."""

@@ -118,9 +118,11 @@ class MemoryRepository:
         return location
 
 
-def opener(catalog):
+def opener(catalog, asked_with=None):
     @contextmanager
-    def open_catalog(store):
+    def open_catalog(store, name=""):
+        if asked_with is not None:
+            asked_with.append((store.path, name))
         yield catalog
     return open_catalog
 
@@ -264,6 +266,60 @@ class RefreshStoreTests(unittest.TestCase):
     def test_file_that_is_not_a_listing_is_refused(self):
         with self.assertRaises(StoreError):
             RefreshStore(opener(FakeCatalog([])), MemoryRepository(), log=quiet).execute("elsewhere")
+
+
+class RefreshStoresTests(unittest.TestCase):
+    """Several listings refreshed through one browser.
+
+    Starting Chrome is almost the whole cost of a refresh -- about twelve seconds against under two for the
+    requests themselves -- so refreshing seven stores must not pay for seven starts."""
+
+    def setUp(self):
+        from noon_store.use_cases import RefreshStores
+        self.RefreshStores = RefreshStores
+        self.repository = MemoryRepository()
+        self.locations = ["one", "two", "three"]
+        for n, location in enumerate(self.locations):
+            store = StoreRef.parse(f"https://www.noon.com/uae-en/p-1000{n}/")
+            self.repository.saved[location] = StoreListing.fetched(store, f"Store {n}", [product(n)], JAN)
+        self.sessions = 0
+
+    def session_over(self, catalog, asked_with=None):
+        """A browser the use case opens once and reads every store through."""
+        @contextmanager
+        def open_session():
+            self.sessions += 1
+            yield opener(catalog, asked_with)
+        return open_session
+
+    def run_refresh(self, catalog):
+        return self.RefreshStores(self.session_over(catalog), self.repository,
+                                  log=quiet, clock=lambda: FEB).execute(self.locations)
+
+    def test_refreshing_several_listings_starts_one_browser(self):
+        self.run_refresh(FakeCatalog([(product(99), "a")]))
+        self.assertEqual(self.sessions, 1, "each store started a browser of its own")
+
+    def test_every_listing_is_still_refreshed(self):
+        results = self.run_refresh(FakeCatalog([(product(99), "a")]))
+        self.assertEqual([r.added for r in results], [1, 1, 1])
+        for location in self.locations:
+            self.assertIn("SKU99", [p.sku for p in self.repository.load(location).products])
+
+    def test_one_store_failing_does_not_cost_the_others_their_refresh(self):
+        """A single bad listing must not throw away the browser and the stores after it."""
+        self.locations = ["one", "missing", "three"]
+        results = self.run_refresh(FakeCatalog([(product(99), "a")]))
+        self.assertEqual(self.sessions, 1)
+        self.assertEqual([r.location for r in results], ["one", "three"])
+
+    def test_a_refresh_says_the_name_the_listing_already_holds(self):
+        # The workbook knows what the store is called, so asking noon for its name again is a second per
+        # store spent learning what we already had written down.
+        asked = []
+        self.RefreshStores(self.session_over(FakeCatalog([]), asked), self.repository,
+                           log=quiet, clock=lambda: FEB).execute(self.locations)
+        self.assertEqual([name for _, name in asked], ["Store 0", "Store 1", "Store 2"])
 
 
 class StoreRefTests(unittest.TestCase):

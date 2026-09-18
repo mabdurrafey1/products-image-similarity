@@ -40,34 +40,55 @@ class StoreChoiceTests(unittest.TestCase):
         self.assertFalse([name for name in vars(gui) if "DEFAULT_STORE" in name])
 
 
-class FakeBox:
-    """The store box, remembering only what it was last told to be."""
+class FakeControl:
+    """A control of the Stores dialog, remembering only what it was last told to be."""
 
-    def __init__(self):
-        self.state = "readonly"
+    def __init__(self, alive=True):
+        self.state = "normal"
+        self.alive = alive
+
+    def winfo_exists(self):
+        return self.alive
 
     def config(self, **settings):
         self.state = settings["state"]
 
 
-class StoreBoxStateTests(unittest.TestCase):
-    """The box is dead while a task runs, and readonly -- never typable -- once it ends."""
+class StoreControlStateTests(unittest.TestCase):
+    """The dialog's controls are dead while a task runs, and live again once it ends.
 
-    def tab(self):
-        return SimpleNamespace(store_box=FakeBox())
+    Nothing here guards against a store being typed by hand any more: the choices are radiobuttons
+    carrying a fixed label out of `store_choices`, so no string that isn't already a key can be
+    chosen. The old readonly-combobox rule guarded a hazard the widgets no longer have.
+    """
 
-    def test_the_box_cannot_be_changed_while_a_task_runs(self):
-        tab = self.tab()
-        gui.SearchTab._enable_store_box(tab, False)
-        self.assertEqual(tab.store_box.state, "disabled")
+    def tab(self, *controls):
+        return SimpleNamespace(_stores_window=object(), _stores_widgets=list(controls))
 
-    def test_the_box_goes_back_to_readonly_and_never_to_normal(self):
-        """'normal' would let a store be typed by hand, and a typed store is in no dict: the link
-        lookup would quietly return '' and the fetch would read nothing."""
-        tab = self.tab()
+    def test_the_controls_cannot_be_used_while_a_task_runs(self):
+        control = FakeControl()
+        gui.SearchTab._enable_store_box(self.tab(control), False)
+        self.assertEqual(control.state, "disabled")
+
+    def test_the_controls_come_back_when_the_task_ends(self):
+        control = FakeControl()
+        tab = self.tab(control)
         gui.SearchTab._enable_store_box(tab, False)
         gui.SearchTab._enable_store_box(tab, True)
-        self.assertEqual(tab.store_box.state, "readonly")
+        self.assertEqual(control.state, "normal")
+
+    def test_a_closed_dialog_leaves_nothing_to_enable(self):
+        """The controls die with the dialog, so a task that ends after it closes must not touch them."""
+        control = FakeControl()
+        tab = SimpleNamespace(_stores_window=None, _stores_widgets=[control])
+        gui.SearchTab._enable_store_box(tab, False)
+        self.assertEqual(control.state, "normal")
+
+    def test_a_destroyed_control_is_left_alone(self):
+        """A widget can outlive its window as a dead reference; configuring one raises."""
+        control = FakeControl(alive=False)
+        gui.SearchTab._enable_store_box(self.tab(control), False)
+        self.assertEqual(control.state, "normal")
 
 
 if __name__ == "__main__":

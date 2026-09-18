@@ -16,8 +16,9 @@ class CatalogGateway(Protocol):
         """The page for each query, in the same order. The pages may be fetched concurrently."""
 
 
-# Opens a catalog session for a store; the session is released when the `with` block ends.
-OpenCatalog = Callable[[StoreRef], ContextManager[CatalogGateway]]
+# Opens a catalog session for a store; the session is released when the `with` block ends. The name is the
+# one the caller already holds for the store, if any: given it, the session needn't ask noon for it again.
+OpenCatalog = Callable[..., ContextManager[CatalogGateway]]
 
 
 class ListingRepository(Protocol):
