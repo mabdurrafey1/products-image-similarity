@@ -1003,8 +1003,9 @@ class SearchTab(ttk.Frame):
         views, orphans = noon_seller_stores.account_overview(self.store_choices)
 
         ttk.Label(self._stores_body, font=("Segoe UI", 9, "italic"), wraplength=560,
-                  text="These are the stores your accounts were read to hold. Reload only if they have "
-                       "changed. Refresh adds the new arrivals of every store already fetched."
+                  text="These are the stores your accounts were read to hold. Refresh store list only "
+                       "if the stores themselves have changed. Refresh adds the new arrivals of every "
+                       "store already fetched."
                   ).pack(anchor="w", pady=(0, 10))
 
         if not any(view.stores for view in views):
@@ -1054,7 +1055,7 @@ class SearchTab(ttk.Frame):
 
         footer = ttk.Frame(self._stores_body)
         footer.pack(fill="x", pady=(14, 0))
-        load = ttk.Button(footer, text="↻ Reload from noon", command=self._load_from_dialog)
+        load = ttk.Button(footer, text="↻ Refresh store list", command=self._load_from_dialog)
         load.pack(side="left")
         fetch = ttk.Button(footer, text="Fetch Store", command=self._fetch_from_dialog)
         fetch.pack(side="left", padx=(5, 0))
