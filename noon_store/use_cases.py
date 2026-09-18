@@ -14,6 +14,10 @@ from .ports import CatalogGateway, ListingRepository, OpenCatalog
 # up to two capfuls, so nothing further is asked for.
 FALLBACK_SORTS = (("price", "asc"), ("price", "desc"), ("new_arrivals", "asc"))
 MIN_BATCH = 10  # pages to fetch at once when hunting the last few products
+# How much of noon's own count a fetch must reach to stand as the store's listing. It is not 100% because a
+# complete read legitimately comes up a little short: noon shows only some of a store's near-identical
+# listings at a time. A read that misses more than this did not finish.
+COMPLETE_ENOUGH = 0.9
 
 
 @dataclass(frozen=True)
@@ -238,7 +242,9 @@ class FetchStore(_StoreUseCase):
             crawler.sweep(CatalogQuery())
 
         location = self.repository.find(store)
-        listing = StoreListing.fetched(store, name, crawler.found, self.clock(), self._previous(location))
+        previous = self._previous(location)
+        listing = StoreListing.fetched(store, name, crawler.found, self.clock(), previous)
+        self._check_complete(len(listing.products), first.total, previous)
         location = self.repository.save(listing, location)
         self.log(f"Saved {len(listing.products):,} products to {location} "
                  f"({crawler.requests} pages in {_duration(self.clock() - started)}).")
@@ -246,6 +252,21 @@ class FetchStore(_StoreUseCase):
             self.log("  (noon shows only some of a store's near-identical listings at a time, so a fetch can find "
                      "more products than the store's count)")
         return FetchResult(location, name, len(listing.products))
+
+    def _check_complete(self, found: int, expected: int, previous: Optional[StoreListing]) -> None:
+        """Refuse to replace a saved listing with a read that plainly didn't finish.
+
+        noon refuses requests once its allowance is spent, and a read that never recovers them ends up short
+        without failing. Saving it anyway would drop products the workbook already holds, and nothing would
+        say so until a search stopped finding them. A fetch that says it failed can simply be run again."""
+        if not expected or found >= COMPLETE_ENOUGH * expected:
+            return
+        short = f"only {found:,} of the {expected:,} products noon lists were read"
+        if previous:
+            raise StoreError(f"The store came back incomplete ({short}), so the saved listing was left as it "
+                             f"was rather than replaced with a partial one. Try again in a few minutes.")
+        self.log(f"Warning: the store came back incomplete ({short}); this listing is missing products. "
+                 f"Fetch the store again to complete it.")
 
     def _previous(self, location: Optional[str]) -> Optional[StoreListing]:
         if not location:

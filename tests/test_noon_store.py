@@ -89,6 +89,17 @@ class PriceBlindCatalog(FakeCatalog):
         return super().matches(replace(query, price_min=None, price_max=None), product, category)
 
 
+class ShortCatalog(FakeCatalog):
+    """A catalog that answers with fewer products than it says the store holds.
+
+    This is what a throttled or partly refused read looks like from the use case's side: noon's own count
+    stands, but the products behind it never all arrive."""
+    claimed = 6
+
+    def page(self, query):
+        return replace(super().page(query), total=self.claimed)
+
+
 class MemoryRepository:
     def __init__(self):
         self.saved = {}
@@ -185,6 +196,38 @@ class FetchStoreTests(unittest.TestCase):
     def test_empty_store_is_an_error(self):
         with self.assertRaises(StoreError):
             self.fetch([])
+
+    def test_a_partial_read_does_not_replace_the_saved_listing(self):
+        """A read that comes up far short of noon's own count must leave the good workbook alone.
+
+        Losing products the workbook already holds is worse than a failed fetch: the fetch says so and can be
+        run again, while a silent overwrite is only discovered when a search stops finding things."""
+        repository = MemoryRepository()
+        self.fetch([(product(n), "a") for n in range(6)], repository, when=JAN)
+        catalog = ShortCatalog([(product(n), "a") for n in range(2)])
+        use_case = FetchStore(opener(catalog), repository, log=quiet, clock=lambda: FEB)
+        with self.assertRaises(StoreError) as caught:
+            use_case.execute(STORE_URL)
+        self.assertIn("2", str(caught.exception))
+        saved = repository.load(repository.find(StoreRef.parse(STORE_URL)))
+        self.assertEqual(len(saved.products), 6, "the partial read replaced the saved listing")
+
+    def test_a_partial_read_is_saved_with_a_warning_when_nothing_is_saved_yet(self):
+        """With no workbook to protect, some products beat none -- but the log must not call it complete."""
+        messages = []
+        catalog = ShortCatalog([(product(n), "a") for n in range(2)])
+        repository = MemoryRepository()
+        result = FetchStore(opener(catalog), repository, log=messages.append,
+                            clock=lambda: JAN).execute(STORE_URL)
+        self.assertEqual(result.product_count, 2)
+        self.assertTrue([m for m in messages if "incomplete" in m.lower()], messages)
+
+    def test_a_store_that_genuinely_shrank_still_replaces_the_saved_listing(self):
+        """Delisting is not a partial read: noon's count and what arrives agree, so the fetch stands."""
+        repository = MemoryRepository()
+        self.fetch([(product(n), "a") for n in range(6)], repository, when=JAN)
+        _, listing, _ = self.fetch([(product(0), "a")], repository, when=FEB)
+        self.assertEqual([p.sku for p in listing.products], ["SKU0"])
 
     def test_stop_request_ends_the_fetch_without_saving(self):
         repository = MemoryRepository()
