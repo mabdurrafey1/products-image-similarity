@@ -1014,6 +1014,8 @@ class SearchTab(ttk.Frame):
         # Ticked stores survive a redraw: the dialog is drawn again whenever the stores change, and a
         # tick lost to that would quietly drop a store out of the refresh somebody had just asked for.
         ticked = getattr(self, "_store_ticks", {})
+        first_draw = not ticked
+        chosen = self.store_url_var.get()
         self._store_ticks = {}
 
         for view in views:
@@ -1024,24 +1026,25 @@ class SearchTab(ttk.Frame):
             for label, _ in view.stores:
                 row = ttk.Frame(self._stores_body)
                 row.pack(fill="x", padx=(14, 0))
-                # A tick chooses which stores Fetch and Refresh act on -- several at a time, which is
-                # what they do anyway; the radio beside it still names the one store the search uses.
-                tick = tk.BooleanVar(value=bool(ticked.get(label, tk.BooleanVar()).get())
-                                     if label in ticked else False)
+                # One control per store: the tick is the choice. It says which stores Fetch and Refresh
+                # act on -- several at a time -- and the first of them is the store the search runs
+                # against, so there is nothing else to set and no second control to disagree with.
+                # On the first draw the store already saved comes up ticked, so the dialog opens
+                # showing what the row behind it says.
+                tick = tk.BooleanVar(value=bool(ticked[label].get()) if label in ticked
+                                     else (first_draw and label == chosen))
                 self._store_ticks[label] = tick
-                box = ttk.Checkbutton(row, variable=tick)
-                box.pack(side="left")
                 # The link is looked up by label, so the label is what the choice carries
-                button = ttk.Radiobutton(row, text=label, value=label,
-                                         variable=self.store_url_var)
-                button.pack(side="left")
+                box = ttk.Checkbutton(row, text=label, variable=tick,
+                                      command=self._store_tick_changed)
+                box.pack(side="left")
                 # A store with no workbook yet cannot be refreshed, only fetched. Saying so here is the
                 # whole answer to "why did two of my four stores refresh?" -- the other two were never
                 # fetched, and Refresh had nothing of theirs to add to.
                 if not self._has_listing(label):
                     ttk.Label(row, text="not fetched yet", font=("Segoe UI", 8),
                               foreground="#777777").pack(side="left", padx=(6, 0))
-                self._stores_widgets += [box, button]
+                self._stores_widgets.append(box)
 
         if orphans:
             # Saved with a store box from an account since removed: nothing can fetch these
@@ -1073,19 +1076,26 @@ class SearchTab(ttk.Frame):
             return False   # a link that isn't a store has no listing, which is all this asks
 
     def _ticked_stores(self):
-        """The labels of the ticked stores, in the order they are drawn; the chosen one if none is."""
-        ticked = [label for label, tick in getattr(self, "_store_ticks", {}).items() if tick.get()]
+        """The labels of the ticked stores, in the order they are drawn."""
+        return [label for label, tick in getattr(self, "_store_ticks", {}).items() if tick.get()]
+
+    def _store_tick_changed(self):
+        """Point the search at the first ticked store, so the tick is the only choice there is.
+
+        The row behind the dialog shows this, and the search and the saved setting read it. Untick
+        everything and it falls back to the store already chosen rather than to nothing, since the
+        search still has to run against something.
+        """
+        ticked = self._ticked_stores()
         if ticked:
-            return ticked
-        chosen = self.store_url_var.get()
-        return [chosen] if chosen in self.store_choices else []
+            self.store_url_var.set(ticked[0])
 
     def _load_from_dialog(self):
         """The dialog stays open while the work runs: its controls go dead, not the window itself."""
         self.start_load_stores()
 
     def _fetch_from_dialog(self):
-        """Fetch every ticked store, one after another, rather than only the one the radio names."""
+        """Fetch every ticked store, one after another."""
         labels = self._ticked_stores()
         if not labels:
             messagebox.showinfo("Fetch Store", "Tick the stores to fetch first.")
