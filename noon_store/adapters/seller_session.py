@@ -15,6 +15,12 @@ context stops sending, and noon then answers 401 -- which is the signal, and the
 Chrome again. Guessing at expiry instead would either open Chrome while the session was still good or
 promise one that had already gone.
 
+This module is the one place any of that is kept. Every noon request the app makes on the user's own
+account -- listing the stores, naming one, reading a page of its catalog -- asks here first and opens
+Chrome only if the answer is no, or if noon refuses what it was given. Within a run there is a single
+copy of the sessions, held here behind a lock and written through to the file; nothing re-reads the
+file per call and nothing keeps a second copy of its own.
+
 The file holds live session cookies: anything that can read it can act as the account until they
 lapse. It is written to the user's home directory, readable only by them.
 """
@@ -22,11 +28,19 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from typing import Mapping, Optional
 
 SESSION_FILE = "~/.noon_seller_sessions.json"
 DENIED = (401, 403)   # noon turning us away: the one thing that sends us back to Chrome
+
+# The one copy of each session file this process has, and the lock that keeps it one. Every noon
+# request goes through here, so the alternative -- re-reading the file per call, as this did at first --
+# is several answers to a question that has only one, drifting apart the moment two of them are held at
+# once. The catalog now posts from a thread pool, so the lock is not decoration.
+_LOCK = threading.RLock()
+_STORES: dict = {}
 
 
 def _canonical(path: str, paths=os.path) -> str:
@@ -43,14 +57,27 @@ def _canonical(path: str, paths=os.path) -> str:
     return paths.normpath(paths.expanduser(path))
 
 
-def _all_sessions(path: str) -> dict:
-    """Every session written down so far; nothing at all before the first account was read."""
+def _from_disk(target: str) -> dict:
+    """Whatever the file holds; nothing at all before the first account was read."""
     try:
-        with open(os.path.expanduser(path)) as handle:
+        with open(target) as handle:
             found = json.load(handle)
     except (OSError, ValueError):
         return {}
     return found if isinstance(found, dict) else {}
+
+
+def _all_sessions(path: str) -> dict:
+    """The one live copy of this file's sessions, read from disk the first time it is asked for.
+
+    Returned rather than copied: the callers below hold the lock and write it straight back, so this
+    is the store itself, not a snapshot of it.
+    """
+    target = os.path.expanduser(path)
+    with _LOCK:
+        if target not in _STORES:
+            _STORES[target] = _from_disk(target)
+        return _STORES[target]
 
 
 def _write(found: dict, path: str) -> None:
@@ -73,12 +100,13 @@ def load_session(profile: str, path: str = SESSION_FILE) -> Optional[dict]:
     None means "nobody has been through Chrome for this account yet", never "the session has lapsed":
     only noon can say that, by refusing a call.
     """
-    saved = _all_sessions(path).get(_canonical(profile))
-    if not isinstance(saved, dict):
-        return None
-    if not saved.get("state") or not saved.get("headers"):
-        return None   # half a session is no session: it would fail the call it was trusted for
-    return saved
+    with _LOCK:
+        saved = _all_sessions(path).get(_canonical(profile))
+        if not isinstance(saved, dict):
+            return None
+        if not saved.get("state") or not saved.get("headers"):
+            return None   # half a session is no session: it would fail the call it was trusted for
+        return dict(saved)   # the store keeps its own copy, so a caller's fiddling cannot reach it
 
 
 def save_session(profile: str, state: Mapping, headers: Mapping[str, str],
@@ -91,21 +119,23 @@ def save_session(profile: str, state: Mapping, headers: Mapping[str, str],
     is the browser's own -- sent so a request made outside the page still describes the client the
     session belongs to, rather than announcing itself as a different one.
     """
-    found = _all_sessions(path)
-    saved = {"state": dict(state), "headers": dict(headers), "saved_at": int(time.time())}
-    if body is not None:
-        saved["body"] = dict(body)
-    if user_agent:
-        saved["user_agent"] = user_agent
-    # Merged over whatever is already filed: the stores path saves no body and the catalog path does,
-    # and whichever ran last must not throw away what the other had learned about this account.
-    existing = _all_sessions(path).get(_canonical(profile))
-    if isinstance(existing, dict):
-        merged = dict(existing)
-        merged.update(saved)
-        saved = merged
-    found[_canonical(profile)] = saved
-    _write(found, path)
+    with _LOCK:
+        found = _all_sessions(path)
+        saved = {"state": dict(state), "headers": dict(headers), "saved_at": int(time.time())}
+        if body is not None:
+            saved["body"] = dict(body)
+        if user_agent:
+            saved["user_agent"] = user_agent
+        # Merged over whatever is already filed: the stores path saves no body and the catalog path
+        # does, and whichever ran last must not throw away what the other had learned about this
+        # account. Read from the same store it is written back to, so the two cannot disagree.
+        existing = found.get(_canonical(profile))
+        if isinstance(existing, dict):
+            merged = dict(existing)
+            merged.update(saved)
+            saved = merged
+        found[_canonical(profile)] = saved
+        _write(found, path)
 
 
 def forget_session(profile: str, path: str = SESSION_FILE) -> None:
@@ -114,7 +144,8 @@ def forget_session(profile: str, path: str = SESSION_FILE) -> None:
     A session left behind would be inherited by whoever signs into that directory name next, and their
     stores would then be read through somebody else's cookies.
     """
-    found = _all_sessions(path)
-    if found.pop(_canonical(profile), None) is None:
-        return
-    _write(found, path)
+    with _LOCK:
+        found = _all_sessions(path)
+        if found.pop(_canonical(profile), None) is None:
+            return
+        _write(found, path)
