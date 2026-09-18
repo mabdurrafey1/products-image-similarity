@@ -6,6 +6,7 @@ fetches a catalog the account may not even own.
 """
 
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 import gui
@@ -37,6 +38,36 @@ class StoreChoiceTests(unittest.TestCase):
     def test_no_store_is_written_into_the_source(self):
         """The screenshot's three stores came from here; nothing may reintroduce them."""
         self.assertFalse([name for name in vars(gui) if "DEFAULT_STORE" in name])
+
+
+class FakeBox:
+    """The store box, remembering only what it was last told to be."""
+
+    def __init__(self):
+        self.state = "readonly"
+
+    def config(self, **settings):
+        self.state = settings["state"]
+
+
+class StoreBoxStateTests(unittest.TestCase):
+    """The box is dead while a task runs, and readonly -- never typable -- once it ends."""
+
+    def tab(self):
+        return SimpleNamespace(store_box=FakeBox())
+
+    def test_the_box_cannot_be_changed_while_a_task_runs(self):
+        tab = self.tab()
+        gui.SearchTab._enable_store_box(tab, False)
+        self.assertEqual(tab.store_box.state, "disabled")
+
+    def test_the_box_goes_back_to_readonly_and_never_to_normal(self):
+        """'normal' would let a store be typed by hand, and a typed store is in no dict: the link
+        lookup would quietly return '' and the fetch would read nothing."""
+        tab = self.tab()
+        gui.SearchTab._enable_store_box(tab, False)
+        gui.SearchTab._enable_store_box(tab, True)
+        self.assertEqual(tab.store_box.state, "readonly")
 
 
 if __name__ == "__main__":

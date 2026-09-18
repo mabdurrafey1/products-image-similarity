@@ -843,6 +843,13 @@ class SearchTab(ttk.Frame):
             self.append_log(f"  (belongs to no account here, cannot be fetched) {label}\n")
         self.append_log("\n")
 
+    def _enable_store_box(self, enabled):
+        """Let the store be changed, or don't, while something is reading one.
+
+        Readonly is the box's resting state and it never goes back to "normal": a normal combobox takes
+        typed text, and a typed store is in no dict, so the link lookup would quietly come back empty."""
+        self.store_box.config(state="readonly" if enabled else "disabled")
+
     def _select_store(self, url):
         """Show the store with this link, or the first one the account offers."""
         for label, link in self.store_choices.items():
@@ -859,6 +866,7 @@ class SearchTab(ttk.Frame):
         if self.is_running:
             return
         self.load_stores_btn.config(state="disabled")
+        self._enable_store_box(False)
         self._store_log("Reading the stores of your noon accounts...")
         threading.Thread(target=self._load_stores, daemon=True).start()
 
@@ -873,6 +881,7 @@ class SearchTab(ttk.Frame):
 
     def _stores_loaded(self, choices, error):
         self.load_stores_btn.config(state="normal")
+        self._enable_store_box(True)
         if error:
             self._store_log(f"[ERROR] The stores couldn't be read: {error}")
             messagebox.showerror("Load Stores", error)
@@ -900,6 +909,7 @@ class SearchTab(ttk.Frame):
             return
         self.accounts_btn.config(state="disabled")
         self.load_stores_btn.config(state="disabled")
+        self._enable_store_box(False)
         self._store_log("Opening a window to sign into the new noon account...")
         threading.Thread(target=self._add_account, daemon=True).start()
 
@@ -915,6 +925,7 @@ class SearchTab(ttk.Frame):
     def _account_added(self, added, error):
         self.accounts_btn.config(state="normal")
         self.load_stores_btn.config(state="normal")
+        self._enable_store_box(True)
         if error:
             self._store_log(f"[ERROR] The account wasn't added: {error}")
             messagebox.showerror("Add Account", error)
@@ -1065,6 +1076,7 @@ class SearchTab(ttk.Frame):
         for button in (self.run_btn, self.fetch_store_btn, self.refresh_btn, self.load_stores_btn,
                        self.accounts_btn, self.refresh_files_btn):
             button.config(state="disabled")
+        self._enable_store_box(False)
         self.stop_btn.config(state="normal")
         self.progress.config(mode="indeterminate")
         self.progress.start(10)
@@ -1125,6 +1137,7 @@ class SearchTab(ttk.Frame):
         for button in (self.run_btn, self.fetch_store_btn, self.refresh_btn, self.load_stores_btn,
                        self.accounts_btn, self.refresh_files_btn):
             button.config(state="normal")
+        self._enable_store_box(True)
         self.stop_btn.config(state="disabled")
         self.main_app.notebook.tab(self, text=f"Search Tab #{self.tab_id}")
         self.status_var.set(message)
