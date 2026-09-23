@@ -44,7 +44,9 @@ class WindowsUpdateSwapTest(unittest.TestCase):
         # Relaunched instead of a real exe, and it leaves proof it ran.
         self.marker = os.path.join(self.root, "relaunched.txt")
         self.log = os.path.join(self.root, "update_log.txt")
-        relaunch = f'@echo off\r\necho yes > "{self.marker}"\r\n'
+        # Plain newlines: the file is opened in text mode, which turns them into CRLF itself.
+        # Writing CRLF here would come out as CR CR LF and cmd will not run that.
+        relaunch = f'@echo off\necho yes > "{self.marker}"\n'
         self._write(self.app, "relaunch.bat", relaunch)
 
         # The new release: a new version, and its own empty input_data, which must not win.
