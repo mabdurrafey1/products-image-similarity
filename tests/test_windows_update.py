@@ -53,6 +53,15 @@ class WindowsUpdateSwapTest(unittest.TestCase):
         self._write(self.new, "relaunch.bat", relaunch)
         self._write(self.new, os.path.join("input_data", "from_build.xlsx"), "the build's copy")
 
+    def tearDown(self):
+        """Always show what the script did. A passing run is worth reading too: it is the only
+        place the swap is ever seen working."""
+        if os.path.exists(self.log):
+            with open(self.log) as handle:
+                print(f"\n--- {self.id().rsplit('.', 1)[-1]} ---\n{handle.read()}")
+        else:
+            print(f"\n--- {self.id().rsplit('.', 1)[-1]}: the script wrote no log ---")
+
     def _write(self, base, name, text):
         path = os.path.join(base, name)
         os.makedirs(os.path.dirname(path), exist_ok=True)

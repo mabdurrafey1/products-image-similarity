@@ -128,20 +128,22 @@ rem Everything it does is written to a log beside the app: this runs after the w
 rem so a failure here has nothing to report it and would otherwise be silent.
 setlocal
 set LOG={log}
-echo [%DATE% %TIME%] update starting, waiting for pid {pid}>>"%LOG%"
-rem What tasklist thinks of that pid, recorded once. An earlier version of this script waited by
-rem parsing tasklist and never stopped waiting; this says why if it ever happens again.
-tasklist /FI "PID eq {pid}">>"%LOG%" 2>&1
+set NEW={new}
+set APP={app}
+echo [%DATE% %TIME%] update starting, waiting for pid {pid} >> "%LOG%"
 rem Wait-Process is built for this: no text to parse, it returns at once if the process has already
 rem gone, and the timeout means a wait that goes wrong costs two minutes rather than forever.
-powershell -NoProfile -NonInteractive -Command "try {{ Wait-Process -Id {pid} -Timeout 120 }} catch {{ }}">>"%LOG%" 2>&1
-echo [%TIME%] app closed, copying files>>"%LOG%"
+powershell -NoProfile -NonInteractive -Command "try {{ Wait-Process -Id {pid} -Timeout 120 }} catch {{ }}" >> "%LOG%" 2>&1
+echo [%TIME%] app closed >> "%LOG%"
+where robocopy >> "%LOG%" 2>&1
+echo [%TIME%] copying "%NEW%" to "%APP%" >> "%LOG%"
 rem /E adds and overwrites but never deletes, and input_data is skipped outright, so the store
 rem listings the user has fetched are not casualties of an update.
-robocopy "{new}" "{app}" /E /XD "{app}\\input_data" /NFL /NDL /NJH /NJS /NP>>"%LOG%" 2>&1
-echo [%TIME%] robocopy finished with %ERRORLEVEL%>>"%LOG%"
+robocopy "%NEW%" "%APP%" /E /XD "%APP%\\input_data" /NFL /NDL /NJH /NJS /NP >> "%LOG%" 2>&1
+rem robocopy says 0-7 for success and 8 and up for failure, so it cannot be checked the usual way.
+if errorlevel 8 (echo [%TIME%] ROBOCOPY FAILED with %ERRORLEVEL% >> "%LOG%") else (echo [%TIME%] copied, robocopy said %ERRORLEVEL% >> "%LOG%")
 start "" "{exe}"
-echo [%TIME%] restarted the app>>"%LOG%"
+echo [%TIME%] restarted the app >> "%LOG%"
 rem The script deletes itself last; nothing is left behind in temp that could be run again.
 del "%~f0"
 """
