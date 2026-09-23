@@ -124,23 +124,31 @@ def unpack(zip_path: str, into: str, progress=None) -> str:
 
 SWAP_SCRIPT = """@echo off
 rem Waits for the app to close, puts the new files in place, starts it again, then removes itself.
+rem Everything it does is written to a log beside the app: this runs after the window has closed,
+rem so a failure here has nothing to report it and would otherwise be silent.
 setlocal
+set LOG={log}
+echo [%DATE% %TIME%] update starting, waiting for pid {pid}>>"%LOG%"
 :wait
-tasklist /FI "PID eq {pid}" 2>nul | find "{pid}" >nul
+tasklist /FI "PID eq {pid}" 2>nul | find "{pid}">nul
 if not errorlevel 1 (
-  timeout /t 1 /nobreak >nul
+  rem ping, not timeout: timeout needs a console to read from and this script is detached from one.
+  ping -n 2 127.0.0.1>nul
   goto wait
 )
+echo [%TIME%] app closed, copying files>>"%LOG%"
 rem /E adds and overwrites but never deletes, and input_data is skipped outright, so the store
 rem listings the user has fetched are not casualties of an update.
-robocopy "{new}" "{app}" /E /XD "{app}\\input_data" /NFL /NDL /NJH /NJS /NP >nul
+robocopy "{new}" "{app}" /E /XD "{app}\\input_data" /NFL /NDL /NJH /NJS /NP>>"%LOG%" 2>&1
+echo [%TIME%] robocopy finished with %ERRORLEVEL%>>"%LOG%"
 start "" "{exe}"
+echo [%TIME%] restarted the app>>"%LOG%"
 rem The script deletes itself last; nothing is left behind in temp that could be run again.
 del "%~f0"
 """
 
 
-def install(new_folder: str, app_dir: str = "", exe: str = "") -> str:
+def install(new_folder: str, app_dir: str = "", exe: str = "", log: str = "") -> str:
     """Hand the swap to a detached script and return its path. The caller must then exit.
 
     Windows only: it is the only platform this is published for, and the batch file is the whole
@@ -157,9 +165,11 @@ def install(new_folder: str, app_dir: str = "", exe: str = "") -> str:
     inner = os.path.join(new_folder, os.path.basename(app_dir))
     source = inner if os.path.isdir(inner) else new_folder
     script = os.path.join(tempfile.mkdtemp(prefix="apdf_update_"), "apply_update.bat")
+    log = log or os.path.join(app_dir, "update_log.txt")
     with open(script, "w") as handle:
         handle.write(SWAP_SCRIPT.format(pid=os.getpid(), new=os.path.abspath(source),
-                                        app=os.path.abspath(app_dir), exe=os.path.abspath(exe)))
+                                        app=os.path.abspath(app_dir), exe=os.path.abspath(exe),
+                                        log=os.path.abspath(log)))
     # Detached, so closing the app does not take the script with it.
     subprocess.Popen(["cmd", "/c", script], close_fds=True,
                      creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
