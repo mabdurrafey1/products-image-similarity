@@ -129,13 +129,12 @@ rem so a failure here has nothing to report it and would otherwise be silent.
 setlocal
 set LOG={log}
 echo [%DATE% %TIME%] update starting, waiting for pid {pid}>>"%LOG%"
-:wait
-tasklist /FI "PID eq {pid}" 2>nul | find "{pid}">nul
-if not errorlevel 1 (
-  rem ping, not timeout: timeout needs a console to read from and this script is detached from one.
-  ping -n 2 127.0.0.1>nul
-  goto wait
-)
+rem What tasklist thinks of that pid, recorded once. An earlier version of this script waited by
+rem parsing tasklist and never stopped waiting; this says why if it ever happens again.
+tasklist /FI "PID eq {pid}">>"%LOG%" 2>&1
+rem Wait-Process is built for this: no text to parse, it returns at once if the process has already
+rem gone, and the timeout means a wait that goes wrong costs two minutes rather than forever.
+powershell -NoProfile -NonInteractive -Command "try {{ Wait-Process -Id {pid} -Timeout 120 }} catch {{ }}">>"%LOG%" 2>&1
 echo [%TIME%] app closed, copying files>>"%LOG%"
 rem /E adds and overwrites but never deletes, and input_data is skipped outright, so the store
 rem listings the user has fetched are not casualties of an update.
