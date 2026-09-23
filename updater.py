@@ -139,7 +139,9 @@ where robocopy >> "%LOG%" 2>&1
 echo [%TIME%] copying "%NEW%" to "%APP%" >> "%LOG%"
 rem /E adds and overwrites but never deletes, and input_data is skipped outright, so the store
 rem listings the user has fetched are not casualties of an update.
-robocopy "%NEW%" "%APP%" /E /XD "%APP%\\input_data" /NFL /NDL /NJH /NJS /NP >> "%LOG%" 2>&1
+rem /XD matches directories in the SOURCE, so it is the new build's input_data that has to be
+rem named here. Naming the destination's looks right and excludes nothing at all.
+robocopy "%NEW%" "%APP%" /E /XD "%NEW%\\input_data" "%APP%\\input_data" /NFL /NDL /NJH /NJS /NP >> "%LOG%" 2>&1
 rem robocopy says 0-7 for success and 8 and up for failure, so it cannot be checked the usual way.
 if errorlevel 8 (echo [%TIME%] ROBOCOPY FAILED with %ERRORLEVEL% >> "%LOG%") else (echo [%TIME%] copied, robocopy said %ERRORLEVEL% >> "%LOG%")
 start "" "{exe}"
