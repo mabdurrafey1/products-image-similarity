@@ -20,3 +20,6 @@ input_data
 reports
 .agents
 skills-lock.json
+
+# Written by build_dist.py from the CI tag; the tag stays the only declared version
+_version.py

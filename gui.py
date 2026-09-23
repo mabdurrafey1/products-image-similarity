@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import threading
 import time
+import tempfile
 import webbrowser
 
 from app_icon import set_app_icon
@@ -1493,6 +1494,13 @@ class DuplicateFinderGUI:
         
         self.close_tab_btn = ttk.Button(top_bar, text="✕ Close Current Tab", command=self.close_current_tab, style="CloseTab.TButton")
         self.close_tab_btn.pack(side="left", padx=5, pady=5)
+
+        # Top right: says the version it is running until it has something better to say.
+        self.update_btn = ttk.Button(top_bar, text="↻ Check for Updates",
+                                     command=self.check_for_updates)
+        self.update_btn.pack(side="right", padx=5, pady=5)
+        self._pending_update = None
+        self.root.after(2000, self._check_updates_quietly)
         
         # Notebook Layout
         self.notebook = ttk.Notebook(root)
@@ -1503,6 +1511,125 @@ class DuplicateFinderGUI:
         
         # Add initial search tab
         self.add_search_tab()
+
+    def _check_updates_quietly(self):
+        """Ask once, shortly after start-up, and say so on the button if there is something new.
+
+        Nothing is downloaded and nothing interrupts: a start-up check that threw up a dialog would
+        get in the way of the work the app was opened to do. Failures are silent by design -- being
+        offline is not an error worth a popup when the user did not ask about updates at all.
+        """
+        def look():
+            try:
+                import updater
+                found = updater.latest_release()
+                if updater.is_newer(found["tag"], updater.current_version()) and found["url"]:
+                    self.root.after(0, self._note_update, found)
+            except Exception:
+                pass
+        threading.Thread(target=look, daemon=True).start()
+
+    def _note_update(self, found):
+        self._pending_update = found
+        self.update_btn.config(text=f"\u2b07 Update to {found['tag']}")
+
+    def check_for_updates(self):
+        """The button: look now, and offer to install whatever is newer."""
+        import updater
+        found = self._pending_update
+        if found is None:
+            self.update_btn.config(text="Checking...", state="disabled")
+            def look():
+                try:
+                    result = updater.latest_release()
+                except Exception as error:
+                    result = error
+                self.root.after(0, done, result)
+            def done(result):
+                self.update_btn.config(text="\u21bb Check for Updates", state="normal")
+                if isinstance(result, Exception):
+                    messagebox.showerror("Check for Updates",
+                                         f"Couldn't reach GitHub to check for updates:\n\n{result}")
+                    return
+                if not updater.is_newer(result["tag"], updater.current_version()):
+                    messagebox.showinfo("Check for Updates",
+                                        f"You are up to date (running {updater.current_version()}).")
+                    return
+                self._note_update(result)
+                self._offer_update(result)
+            threading.Thread(target=look, daemon=True).start()
+            return
+        self._offer_update(found)
+
+    def _offer_update(self, found):
+        """Ask before replacing the app, then do it with the progress on show."""
+        import updater
+        size = found.get("size") or 0
+        how_big = f" ({size / (1024 * 1024):.0f} MB)" if size else ""
+        if not messagebox.askyesno(
+                "Update Available",
+                f"{found['tag']} is available{how_big}. You are running {updater.current_version()}.\n\n"
+                "The app will close and reopen once it is installed. Install now?"):
+            return
+        if not sys.platform.startswith("win"):
+            messagebox.showinfo("Update Available",
+                                "Installing in place is only supported on Windows. Download "
+                                f"{found['tag']} from:\n\n{updater.RELEASES_PAGE}")
+            return
+        self._run_update(found)
+
+    def _run_update(self, found):
+        """Download, unpack, then hand the swap over and quit.
+
+        The window stays up showing progress for the whole download because it is a large one, and a
+        frozen-looking window with no explanation is how people end up force-quitting halfway.
+        """
+        import updater
+        window = tk.Toplevel(self.root)
+        window.title("Updating")
+        window.transient(self.root)
+        window.resizable(False, False)
+        window.protocol("WM_DELETE_WINDOW", lambda: None)
+        label = ttk.Label(window, text=f"Downloading {found['tag']}...", width=46)
+        label.pack(padx=20, pady=(18, 6))
+        bar = ttk.Progressbar(window, orient="horizontal", length=380, mode="determinate",
+                              maximum=100.0)
+        bar.pack(padx=20, pady=(0, 18))
+
+        def show(text, percent):
+            label.config(text=text)
+            bar.config(value=percent)
+
+        def work():
+            try:
+                folder = tempfile.mkdtemp(prefix="apdf_download_")
+                zip_path = os.path.join(folder, updater.ASSET_NAME)
+
+                def downloading(done, total):
+                    megabytes = done / (1024 * 1024)
+                    if total:
+                        self.root.after(0, show, f"Downloading {found['tag']}: "
+                                                 f"{megabytes:.0f} of {total / (1024 * 1024):.0f} MB",
+                                        done * 100.0 / total)
+                    else:
+                        self.root.after(0, show, f"Downloading {found['tag']}: {megabytes:.0f} MB", 0)
+
+                updater.download(found["url"], zip_path, progress=downloading)
+                self.root.after(0, show, "Unpacking...", 100.0)
+                unpacked = updater.unpack(zip_path, os.path.join(folder, "new"))
+                updater.install(unpacked)
+            except Exception as error:
+                self.root.after(0, failed, error)
+                return
+            self.root.after(0, self.root.destroy)
+
+        def failed(error):
+            window.destroy()
+            messagebox.showerror("Update Failed",
+                                 f"The update could not be installed:\n\n{error}\n\n"
+                                 f"You can download it yourself from:\n{updater.RELEASES_PAGE}")
+
+        threading.Thread(target=work, daemon=True).start()
 
     def add_search_tab(self):
         self.tab_counter += 1

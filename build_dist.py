@@ -3,7 +3,24 @@ import shutil
 import subprocess
 import sys
 
+def stamp_version():
+    """Write the tag being built into _version.py so the running app knows what it is.
+
+    The tag is the only place a version is declared, so rather than keep a copy in the repo that
+    could drift from it, the build takes the tag it was triggered by and writes it out. A local
+    build with no tag says "dev", which the updater reads as "not a release" and leaves alone.
+    """
+    tag = (os.environ.get("APP_VERSION") or os.environ.get("GITHUB_REF_NAME") or "").strip()
+    if not tag.startswith("v"):
+        tag = "dev"
+    with open("_version.py", "w") as handle:
+        handle.write(f'VERSION = "{tag}"\n')
+    print(f"Stamped version: {tag}")
+    return tag
+
+
 def build():
+    stamp_version()
     print("=== Step 1: Running PyInstaller to build gui.py ===")
     
     # Locate Python interpreter to run PyInstaller as a module
@@ -20,6 +37,9 @@ def build():
         "--noconsole",
         "--hidden-import=onnxruntime",
         "--hidden-import=huggingface_hub",
+        # Imported inside a function so a dev checkout can do without it, which means PyInstaller's
+        # scan never sees it; named here or the built app would report no version at all.
+        "--hidden-import=_version",
         "--name=AI_Product_Duplicate_Finder",
         "gui.py"
     ]
