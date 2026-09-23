@@ -340,8 +340,9 @@ def run_semantic_text_search(df, reference_title, visual_scores, min_text_sim, s
     for idx, row in df.iterrows():
         check_stop()
         sku = str(row.get('SKU', '')).strip().upper()
-        if sku not in visual_scores:
-            continue
+        # Deliberately not requiring a visual score here. A product whose image was never downloaded
+        # has no score at all, and skipping it meant its title was never even read -- so a listing
+        # that named the same product word for word could not be found for want of a picture.
         title = str(row.get('Title', ''))
         if not title:
             continue
@@ -389,8 +390,18 @@ def run_semantic_text_search(df, reference_title, visual_scores, min_text_sim, s
             
     return text_matches
 
-def save_and_display_results(text_matches, visual_scores, output_path, top_limit, min_score=0.20):
-    """Format, sort, display, and save results to JSON."""
+def save_and_display_results(text_matches, visual_scores, output_path, top_limit, min_score=0.20,
+                             strong_text=0.85, base_min_score=None):
+    """Format, sort, display, and save results to JSON.
+
+    A result survives on either evidence, not on the picture alone. `min_score` is the visual bar,
+    raised as the run goes on to sit near the best image match; `strong_text` is the bar a title has
+    to clear to be kept in spite of its picture. A strong title is held to `base_min_score` -- the
+    threshold actually asked for -- rather than the floating one, so a single excellent image match
+    elsewhere in the set cannot cull a product that reads as the same thing.
+    """
+    if base_min_score is None:
+        base_min_score = min_score
     results_data = []
     if text_matches:
         print(f"Found {len(text_matches)} products matching text criteria. Attaching visual similarity scores...")
@@ -403,7 +414,13 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
             
             # Look up score from rclip visual search
             score = visual_scores.get(sku_lookup, None)
-            if score is None or score < min_score:
+            visual_ok = score is not None and score >= min_score
+            # Kept on the strength of the title even though the image disagrees, or is missing
+            # entirely. This is what makes the "very high text match" tier below reachable: before,
+            # those rows were dropped here, and the tier could never fire.
+            text_ok = (semantic_sim >= strong_text
+                       and (score is None or score >= base_min_score))
+            if not (visual_ok or text_ok):
                 continue
             
             price = row.get('Price', '')
@@ -424,15 +441,22 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
                 "Price": float(price) if not pd.isna(price) else None,
                 "AI Score": score,
                 "Text Similarity": semantic_sim,
+                # Said plainly so a title match is never read as a picture match. "title" here means
+                # the image disagreed or there was no image to compare.
+                "Matched On": "image" if visual_ok else "title",
                 "Image Filename": f"{sku}.jpg"
             })
             
         # Calculate max values to normalize both scores to [0, 1]
-        max_visual = max(x["AI Score"] for x in results_data if x["AI Score"] is not None) if results_data else 1.0
+        # Defaulted rather than taken straight from max(), because every surviving row can now be a
+        # title match with no image score at all, and max() of nothing raises.
+        scored = [x["AI Score"] for x in results_data if x["AI Score"] is not None]
+        max_visual = max(scored) if scored else 1.0
         if max_visual <= 0:
             max_visual = 1.0
-            
-        max_text = max(x["Text Similarity"] for x in results_data if x["Text Similarity"] is not None) if results_data else 1.0
+
+        texts = [x["Text Similarity"] for x in results_data if x["Text Similarity"] is not None]
+        max_text = max(texts) if texts else 1.0
         if max_text <= 0:
             max_text = 1.0
  
@@ -633,6 +657,7 @@ def main(args=None, stop_event=None):
             parser.add_argument("--top", type=int, default=500, help="Number of top visual matches to retrieve (default: 500)")
             parser.add_argument("--min-score", type=float, default=0.20, help="Minimum AI similarity score threshold (default: 0.20)")
             parser.add_argument("--min-text-sim", type=float, default=0.70, help="Minimum semantic text similarity score (default: 0.70, set to 0.0 to disable)")
+            parser.add_argument("--min-strong-text", type=float, default=0.85, help="Text similarity at which a product is kept despite a poor or missing image (default: 0.85, set to 1.1 to disable)")
             parser.add_argument("--strict", action="store_true", help="Enforce strict alphanumeric model code matching")
             parser.add_argument("--query-title", default="", help="Pasted title text to use as reference baseline for semantic text similarity")
             parser.add_argument("--image-dir", default="downloaded_images", help="Directory where database images are stored")
@@ -747,8 +772,11 @@ def main(args=None, stop_event=None):
         # 9. Format, sort, save and print results
         max_score = max(visual_scores.values()) if visual_scores else 0.0
         dynamic_min_score = max(args.min_score, max_score - 0.45)
-        print(f"Top visual score: {max_score:.3f} | Dynamic visual threshold: {dynamic_min_score:.3f}")
-        save_and_display_results(text_matches, visual_scores, args.output, args.top, dynamic_min_score)
+        strong_text = getattr(args, "min_strong_text", 0.85)
+        print(f"Top visual score: {max_score:.3f} | Dynamic visual threshold: {dynamic_min_score:.3f} "
+              f"| Strong-title threshold: {strong_text:.2f}")
+        save_and_display_results(text_matches, visual_scores, args.output, args.top, dynamic_min_score,
+                                 strong_text=strong_text, base_min_score=args.min_score)
 
     finally:
         # Always clear the per-thread stop event when done

@@ -380,6 +380,10 @@ class SearchTab(ttk.Frame):
             saved_img_sim = min(max(float(saved_config.get("image_threshold", 0.20)), 0.0), 2.0)
         except (TypeError, ValueError):
             saved_img_sim = 0.20
+        try:
+            saved_strong_text = min(max(float(saved_config.get("strong_text_threshold", 85.0)), 0.0), 100.0)
+        except (TypeError, ValueError):
+            saved_strong_text = 85.0
 
         self.text_sim_var = tk.DoubleVar(value=saved_text_sim)
         self.sim_value_lbl = ttk.Label(text_frame, text=f"{saved_text_sim:.0f}%", font=("Segoe UI", 9, "bold"), width=5)
@@ -408,10 +412,33 @@ class SearchTab(ttk.Frame):
         self.img_sim_slider.pack(side="left", fill="x", expand=True, padx=(0, 5))
         self.img_sim_value_lbl.pack(side="left")
 
+        # Keep on Title Threshold: how good a title has to be to survive a bad or missing picture.
+        # Set it to 100% and nothing is kept on its title alone, which is how the search behaved
+        # before this existed.
+        strong_frame = ttk.Frame(sim_frame)
+        strong_frame.pack(side="left", fill="x", expand=True, padx=(15, 0))
+
+        strong_lbl = ttk.Label(strong_frame, text="Keep on Title:")
+        strong_lbl.pack(side="left", padx=(0, 5))
+
+        self.strong_text_var = tk.DoubleVar(value=saved_strong_text)
+        self.strong_text_value_lbl = ttk.Label(strong_frame, text=f"{saved_strong_text:.0f}%",
+                                               font=("Segoe UI", 9, "bold"), width=5)
+
+        def update_strong_text_lbl(val):
+            self.strong_text_value_lbl.config(text=f"{float(val):.0f}%")
+
+        self.strong_text_slider = ttk.Scale(strong_frame, from_=0.0, to=100.0,
+                                            variable=self.strong_text_var, orient="horizontal",
+                                            command=update_strong_text_lbl)
+        self.strong_text_slider.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.strong_text_value_lbl.pack(side="left")
+
         # Persist thresholds whenever they change (debounced so dragging doesn't spam writes)
         self._threshold_save_job = None
         self.text_sim_var.trace_add("write", self._schedule_threshold_save)
         self.img_sim_var.trace_add("write", self._schedule_threshold_save)
+        self.strong_text_var.trace_add("write", self._schedule_threshold_save)
 
         # Progress Bar & Status Row
         self.progress_frame = ttk.Frame(main_frame)
@@ -593,11 +620,13 @@ class SearchTab(ttk.Frame):
         try:
             text_val = round(float(self.text_sim_var.get()), 1)
             img_val = round(float(self.img_sim_var.get()), 2)
+            strong_val = round(float(self.strong_text_var.get()), 1)
         except (tk.TclError, ValueError):
             return
         config = load_config()
         config["text_threshold"] = text_val
         config["image_threshold"] = img_val
+        config["strong_text_threshold"] = strong_val
         save_config(config)
 
     def open_last_results(self):
@@ -706,6 +735,7 @@ class SearchTab(ttk.Frame):
                 top=int(self.top_var.get()),
                 min_text_sim=self.text_sim_var.get() / 100.0,
                 min_score=float(self.img_sim_var.get()),
+                min_strong_text=self.strong_text_var.get() / 100.0,
                 min_price=float(min_p) if min_p else None,
                 max_price=float(max_p) if max_p else None,
                 strict=bool(self.strict_var.get()),
