@@ -1,0 +1,27 @@
+name: Test Updater on Windows
+
+# The update swap is a Windows batch script and cannot be run on the machine this is developed on,
+# so it is exercised here instead. Run it by hand before any release that touches updater.py.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'updater.py'
+      - 'tests/test_windows_update.py'
+      - '.github/workflows/test-updater.yml'
+
+jobs:
+  swap:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install requests
+        run: pip install requests
+
+      - name: Run the swap for real
+        run: python -m unittest tests.test_windows_update -v
