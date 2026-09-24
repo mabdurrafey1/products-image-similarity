@@ -1,7 +1,24 @@
+import hashlib
 import json
 import os
 import re
 import pandas as pd
+
+GOLDEN_ANGLE = 137.50776405003785   # spaces hues apart with no small-N collisions, unlike hash % 360
+
+def brand_tag_style(brand, brand_indices):
+    """A background/border/text color for this brand, unique among the brands seen so far in this report.
+
+    `brand_indices` maps each brand name to the order it was first seen; each new brand gets the next
+    hue stepped by the golden angle around the wheel, so no two brands in one report share a color the
+    way a hashed hue occasionally would.
+    """
+    key = str(brand).strip().lower()
+    index = brand_indices.setdefault(key, len(brand_indices))
+    hue = (index * GOLDEN_ANGLE) % 360
+    return (f'background:hsl({hue:.1f},55%,42%);'
+            f'border-color:hsl({hue:.1f},55%,32%);'
+            f'color:#ffffff;')
 
 def normalize_dataframe(df):
     """Normalize column names from the final Excel layout format."""
@@ -58,6 +75,8 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
         import glob
         excel_files = sorted(glob.glob("input_data/*.xlsx"))
         excel_path = excel_files[0] if excel_files else "combined_listings.xlsx"
+
+    brand_indices = {}   # first-seen order of each brand in this report, so its color is unique
 
     if not os.path.exists(json_path):
         print(f"Error: JSON file '{json_path}' not found.")
@@ -518,6 +537,10 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
             color: #92400e;
         }
 
+        .tag-brand {
+            font-weight: 700;
+        }
+
         /* Product Title */
         .product-title {
             font-size: 0.8rem;
@@ -890,7 +913,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
 
         # Build category/brand/stock pills
         tags_html = ""
-        tags_html += f'<span class="tag-pill">{brand}</span>'
+        tags_html += f'<span class="tag-pill tag-brand" style="{brand_tag_style(brand, brand_indices)}">{brand}</span>'
         if color and not pd.isna(color):
             tags_html += f'<span class="tag-pill">{color}</span>'
         if stock and not pd.isna(stock):
