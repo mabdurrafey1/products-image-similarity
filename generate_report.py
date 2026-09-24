@@ -53,7 +53,7 @@ def load_excel_with_sheets(file_path):
         df = pd.read_excel(file_path)
         return normalize_dataframe(df)
 
-def generate_html_report(json_path="temp/search_results_ai.json", output_html="temp/search_results.html", images_dir="downloaded_images", excel_path=None, query_title="", query_images=None):
+def generate_html_report(json_path="temp/search_results_ai.json", output_html="temp/search_results.html", images_dir="downloaded_images", excel_path=None, query_title="", query_images=None, priority_keywords=None):
     if excel_path is None:
         import glob
         excel_files = sorted(glob.glob("input_data/*.xlsx"))
@@ -795,8 +795,9 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
             <!-- KEYWORD TO TOP -->
             <div class="sidebar-section">
                 <label class="sidebar-label">KEYWORD TO TOP</label>
-                <input type="text" id="keywordBoost" class="price-input" style="width: 100%;" placeholder="e.g. S10" oninput="applyFilters()">
-                <p class="sidebar-subtext">Products whose title contains this move to the top, ahead of the sort below.</p>
+                <div id="keywordBoostChips" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px;"></div>
+                <input type="text" id="keywordBoostInput" class="price-input" style="width: 100%;" placeholder="type a keyword, press Enter" onkeydown="onKeywordBoostKeydown(event)">
+                <p class="sidebar-subtext">Products whose title contains any of these move to the top, ahead of the sort below.</p>
             </div>
 
             <!-- SORT BY -->
@@ -955,6 +956,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
 
     <!-- Modals or full image viewer if needed -->
     <script>
+        const PRIORITY_KEYWORDS = {priority_keywords_json};
         function imgFallback(img) {
             img.onerror = null;
             img.src = 'https://placehold.co/300x300/121829/ffffff?text=Image+Not+Found';
@@ -1021,6 +1023,8 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
         }
 
         document.addEventListener('DOMContentLoaded', () => {
+            renderKeywordBoostChips();
+            if (keywordBoostList.length) applyFilters();
             const titles = document.querySelectorAll('.product-title');
             // Re-check whenever a title's box changes (resize, filters showing a card)
             const observer = new ResizeObserver(entries => {
@@ -1093,18 +1097,56 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
             applyFilters();
         }
 
+        // Keywords highlighted (Ctrl+B) in the query title arrive pre-filled here; the report
+        // is otherwise just a JSON blob with no memory of what was typed, so this is the only way
+        // that choice survives into the HTML.
+        let keywordBoostList = (PRIORITY_KEYWORDS || []).map(k => k.toLowerCase());
+
+        function renderKeywordBoostChips() {
+            const container = document.getElementById('keywordBoostChips');
+            container.innerHTML = '';
+            keywordBoostList.forEach((kw, i) => {
+                const chip = document.createElement('span');
+                chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;border-radius:999px;padding:3px 8px;font-size:0.8rem;';
+                chip.textContent = kw;
+                const remove = document.createElement('span');
+                remove.textContent = '\u00d7';
+                remove.style.cssText = 'cursor:pointer;font-weight:700;';
+                remove.onclick = () => {
+                    keywordBoostList.splice(i, 1);
+                    renderKeywordBoostChips();
+                    applyFilters();
+                };
+                chip.appendChild(remove);
+                container.appendChild(chip);
+            });
+        }
+
+        function onKeywordBoostKeydown(event) {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            const input = document.getElementById('keywordBoostInput');
+            const kw = input.value.trim().toLowerCase();
+            if (kw && !keywordBoostList.includes(kw)) {
+                keywordBoostList.push(kw);
+                renderKeywordBoostChips();
+                applyFilters();
+            }
+            input.value = '';
+        }
+
         function applyFilters() {
             const startPrice = parseFloat(document.getElementById('startPrice').value) || 0;
             const endPrice = parseFloat(document.getElementById('endPrice').value) || Infinity;
             const sortBy = document.getElementById('sortBy').value;
             const sourceFilterEl = document.getElementById('sourceFilter');
             const sourceFilter = sourceFilterEl ? sourceFilterEl.value : 'all';
-            const keywordBoostEl = document.getElementById('keywordBoost');
-            const keywordBoost = keywordBoostEl ? keywordBoostEl.value.trim().toLowerCase() : '';
             const matchesKeyword = card => {
-                if (!keywordBoost) return false;
+                if (!keywordBoostList.length) return false;
                 const titleEl = card.querySelector('.product-title');
-                return titleEl ? titleEl.textContent.toLowerCase().includes(keywordBoost) : false;
+                if (!titleEl) return false;
+                const titleLower = titleEl.textContent.toLowerCase();
+                return keywordBoostList.some(kw => titleLower.includes(kw));
             };
 
             const grid = document.querySelector('.results-grid');
@@ -1144,7 +1186,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
             cards.sort((a, b) => {
                 // A keyword match always sorts above a non-match, whatever the field below sorts by;
                 // ties between two matches (or two non-matches) fall through to that normal ordering.
-                if (keywordBoost) {
+                if (keywordBoostList.length) {
                     const boostA = matchesKeyword(a);
                     const boostB = matchesKeyword(b);
                     if (boostA !== boostB) {
@@ -1189,6 +1231,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
     # Format the header values
     excel_basenames = [os.path.basename(p) for p in excel_paths] if excel_paths else [os.path.basename(str(excel_path))]
     excel_display_name = ", ".join(excel_basenames) if len(excel_basenames) <= 3 else f"{len(excel_basenames)} files"
+    priority_keywords_json = json.dumps([str(k) for k in (priority_keywords or []) if str(k).strip()])
 
     html_content = html_content.replace("{excel_display_name}", excel_display_name)
     html_content = html_content.replace("{total_matches}", str(len(results)))
@@ -1199,6 +1242,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
     html_content = html_content.replace("{query_title_placeholder}", query_title_html)
     html_content = html_content.replace("{query_images_placeholder}", query_images_html)
     html_content = html_content.replace("{source_filter_placeholder}", source_filter_section)
+    html_content = html_content.replace("{priority_keywords_json}", priority_keywords_json)
     # Drop the indentation of every line (line breaks stay, so the script's // comments still end where they did)
     html_content = re.sub(r"\n[ \t]+", "\n", html_content)
 

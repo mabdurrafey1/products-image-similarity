@@ -264,6 +264,13 @@ class SearchTab(ttk.Frame):
         # Standard tk.Text is kept because ttk doesn't have a Text widget
         self.title_text = tk.Text(form_card, height=3, width=40, font=("Segoe UI", 10))
         self.title_text.grid(row=1, column=1, columnspan=2, padx=10, pady=10, sticky="we")
+
+        # Ctrl+B bolds the selected words as "priority keywords" -- a visual mark on the title
+        # text itself, read back at search time to pin matching products ahead of the Top N cutoff
+        # both in the ranking and in the report's keyword-to-top box.
+        self.title_text.tag_configure("bold", font=("Segoe UI", 10, "bold"))
+        self.title_text.bind("<Control-b>", self._toggle_priority_keyword)
+        self.title_text.bind("<Control-B>", self._toggle_priority_keyword)
         
         # 3. Input Source Row (multi-select), folded away when the log and results want the room
         self.sources_open = True
@@ -672,15 +679,43 @@ class SearchTab(ttk.Frame):
         else:
             messagebox.showwarning("No Results", "No generated reports HTML file was found. Run a search first.")
 
+    def _toggle_priority_keyword(self, event=None):
+        """Ctrl+B: bold the current selection, or un-bold it if it's already bold.
+
+        Bolding is the only thing this does -- it never touches the text itself, so the query
+        title a user reads back is exactly what they typed either way.
+        """
+        try:
+            start, end = self.title_text.index(tk.SEL_FIRST), self.title_text.index(tk.SEL_LAST)
+        except tk.TclError:
+            return "break"  # nothing selected
+        already_bold = "bold" in self.title_text.tag_names(start)
+        if already_bold:
+            self.title_text.tag_remove("bold", start, end)
+        else:
+            self.title_text.tag_add("bold", start, end)
+        return "break"  # swallow the default Ctrl+B binding (a no-op in tk.Text anyway)
+
+    def _get_priority_keywords(self):
+        """Every bold-tagged run in the title box, as the list of words/phrases to prioritize."""
+        ranges = self.title_text.tag_ranges("bold")
+        keywords = []
+        for i in range(0, len(ranges), 2):
+            text = self.title_text.get(ranges[i], ranges[i + 1]).strip()
+            if text:
+                keywords.append(text)
+        return keywords
+
     def start_matching_thread(self):
         if self.is_running:
             return
-            
+
         # Reset stop flag on new run
         match_image_ai.stop_requested = False
-            
+
         query_image = self.image_path_var.get().strip()
         query_title = self.title_text.get("1.0", tk.END).strip()
+        priority_keywords = self._get_priority_keywords()
         
         if not query_image:
             messagebox.showerror("Error", "Please select a product query image first.")
@@ -707,7 +742,7 @@ class SearchTab(ttk.Frame):
         self.append_log(f"Starting AI Product Duplicate Finder (Tab #{self.tab_id})...\n")
         
         self.stop_event = threading.Event()
-        thread = threading.Thread(target=self.run_matching_search, args=(query_image, query_title))
+        thread = threading.Thread(target=self.run_matching_search, args=(query_image, query_title, priority_keywords))
         thread.daemon = True
         thread.start()
 
@@ -746,7 +781,7 @@ class SearchTab(ttk.Frame):
         self.log_text.insert(tk.END, text)
         self.log_text.see(tk.END)
 
-    def run_matching_search(self, image_path, query_title):
+    def run_matching_search(self, image_path, query_title, priority_keywords=None):
         import argparse, datetime
         tid = threading.get_ident()
         redirector = CustomStdout(self.main_app.root, self.log_text, self.status_var, self.progress)
@@ -778,6 +813,7 @@ class SearchTab(ttk.Frame):
                 strict=bool(self.strict_var.get()),
                 no_indexing=bool(self.no_indexing_var.get()),
                 image_dir=self.image_dir_var.get().strip(),
+                priority_keywords=priority_keywords or [],
             )
 
             self.main_app.root.after(0, self.status_var.set, "Running AI visual search...")
@@ -809,7 +845,8 @@ class SearchTab(ttk.Frame):
                 output_html=report_path,
                 excel_path=excel_path,
                 query_title=query_title,
-                query_images=query_images_list
+                query_images=query_images_list,
+                priority_keywords=priority_keywords or []
             )
 
             self.main_app.root.after(0, self.on_search_success)

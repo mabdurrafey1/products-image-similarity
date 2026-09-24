@@ -434,7 +434,7 @@ def find_visual_only_matches(df, visual_scores, covered_skus, min_score):
     return matches
 
 def save_and_display_results(text_matches, visual_scores, output_path, top_limit, min_score=0.20,
-                             strong_text=0.85):
+                             strong_text=0.85, priority_keywords=None):
     """Format, sort, display, and save results to JSON.
 
     A result survives on either evidence, not on the picture alone. `min_score` is the visual bar,
@@ -442,7 +442,12 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
     to clear to be kept in spite of its picture -- in spite of it, so a title at or above that bar
     is kept whatever the picture scored, including nothing at all. Holding it to the visual bar as
     well meant the only product a good title ever rescued was one whose image had never downloaded.
+
+    `priority_keywords` are the words the user highlighted (Ctrl+B) in the query title -- a result
+    whose title contains one is pinned ahead of every non-matching result, before the Top N cutoff
+    below, so a highlighted match can never be truncated away in favor of an unhighlighted one.
     """
+    priority_keywords = [str(k).strip().lower() for k in (priority_keywords or []) if str(k).strip()]
     results_data = []
     if text_matches:
         print(f"Evaluating {len(text_matches)} candidate products (matched by title or by picture). Attaching visual similarity scores...")
@@ -513,11 +518,14 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
             # Tier 2 (very high text match, score >= 0.9): sorted strictly by text similarity
             # Tier 1 (otherwise): sorted by combined visual + text similarity
             if vis >= 1.2:
-                item["Sort Key"] = (3, vis)
+                tier = (3, vis)
             elif text_sim >= 0.9:
-                item["Sort Key"] = (2, text_sim)
+                tier = (2, text_sim)
             else:
-                item["Sort Key"] = (1, combined)
+                tier = (1, combined)
+            title_lower = item["Title"].lower()
+            is_priority = any(kw in title_lower for kw in priority_keywords)
+            item["Sort Key"] = (int(is_priority),) + tier
  
         # Sort results descending by Sort Key tuple
         results_data.sort(key=lambda x: x["Sort Key"], reverse=True)
@@ -711,7 +719,16 @@ def main(args=None, stop_event=None):
             parser.add_argument("--no-indexing", action="store_true", help="Skip checking/indexing images in the target directory")
             parser.add_argument("--min-price", type=float, default=None, help="Minimum product price threshold")
             parser.add_argument("--max-price", type=float, default=None, help="Maximum product price threshold")
+            parser.add_argument("--priority-keywords", default="", help="Comma-separated keywords (highlighted in the query title) that pin a match to the top, ahead of the Top N cutoff")
             args = parser.parse_args()
+
+        # The GUI builds a Namespace directly and may pass a list; the CLI parser always hands
+        # back a comma-separated string. Normalize both into the list save_and_display_results wants.
+        raw_priority_keywords = getattr(args, "priority_keywords", "") or ""
+        if isinstance(raw_priority_keywords, str):
+            priority_keywords = [k.strip() for k in raw_priority_keywords.split(",") if k.strip()]
+        else:
+            priority_keywords = [str(k).strip() for k in raw_priority_keywords if str(k).strip()]
 
         # Ensure output parent directory exists if a path is specified
         output_dir = os.path.dirname(args.output)
@@ -829,7 +846,7 @@ def main(args=None, stop_event=None):
         print(f"Top visual score: {max_score:.3f} | Dynamic visual threshold: {dynamic_min_score:.3f} "
               f"| Strong-title threshold: {strong_text:.2f}")
         save_and_display_results(text_matches + visual_only_matches, visual_scores, args.output, args.top,
-                                 dynamic_min_score, strong_text=strong_text)
+                                 dynamic_min_score, strong_text=strong_text, priority_keywords=priority_keywords)
 
     finally:
         # Always clear the per-thread stop event when done
