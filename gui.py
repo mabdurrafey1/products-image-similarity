@@ -135,7 +135,16 @@ class CustomStdout:
         self.progress_bar.config(maximum=100, value=percentage)
 
     def _show_progress(self, line):
-        is_download = "download" in line.lower()
+        lower = line.lower()
+        is_download = "download" in lower
+        is_titles = "matching titles" in lower
+        if is_download:
+            what = "Downloading images"
+        elif is_titles:
+            what = "Matching titles"
+        else:
+            what = "Scanning & indexing images"
+
         counts = self.count_regex.search(line)
         scanned = self.scanned_regex.match(line)
         pct = self.pct_regex.search(line)
@@ -146,9 +155,8 @@ class CustomStdout:
             if total > 0:
                 percentage = min(100, int(done * 100 / total))
                 self._determinate(percentage)
-                what = "Downloading images" if is_download else "Scanning & indexing images"
                 self.status_var.set(f"{what}: {done:,} of {total:,} ({percentage}%)...")
-        elif scanned and not is_download:
+        elif scanned and not is_download and not is_titles:
             # Still counting the folder, so there is no total to divide by yet. Show the running
             # count, which does move, instead of a bar that says nothing.
             found = int(scanned.group(1).replace(",", ""))
@@ -159,10 +167,7 @@ class CustomStdout:
         elif pct:
             percentage = int(pct.group(1))
             self._determinate(percentage)
-            if is_download:
-                self.status_var.set(f"Downloading images: {percentage}%...")
-            else:
-                self.status_var.set(f"Scanning & indexing images: {percentage}%...")
+            self.status_var.set(f"{what}: {percentage}%...")
 
         # Drop tqdm's bar drawing (" 45%|████   | 4654/10342 [...]") and keep the numbers
         line = TQDM_BAR_REGEX.sub(" ", line).strip()

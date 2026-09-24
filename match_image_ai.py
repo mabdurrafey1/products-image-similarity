@@ -365,10 +365,19 @@ def run_semantic_text_search(df, reference_title, visual_scores, min_text_sim, s
     text_bar = min_text_sim if min_text_sim > 0.0 else 0.70
     threshold = min(text_bar, min_strong_text)
     batch_size = 128
+    # Embedding every candidate title is the longest silent stretch of a run on a large catalog,
+    # so it reports as it goes. The carriage return keeps it redrawing one line, which is what the
+    # GUI reads the counts off.
+    total_candidates = len(candidates)
+    processed = 0
     for i in range(0, len(candidates), batch_size):
         check_stop()
         batch_candidates = candidates[i:i+batch_size]
         batch_titles = [item[2] for item in batch_candidates]
+
+        processed += len(batch_candidates)
+        pct = int(processed * 100 / total_candidates) if total_candidates else 100
+        print(f"\rMatching titles: {processed}/{total_candidates} ({pct}%)", end="", flush=True)
         
         try:
             batch_embs = clip_model.compute_text_features(batch_titles)
@@ -393,7 +402,9 @@ def run_semantic_text_search(df, reference_title, visual_scores, min_text_sim, s
                     })
         except Exception as e:
             print(f"Warning: Error processing batch: {e}")
-            
+
+    if total_candidates:
+        print()
     return text_matches
 
 def save_and_display_results(text_matches, visual_scores, output_path, top_limit, min_score=0.20,
