@@ -84,6 +84,12 @@ class CustomStdout:
         self.progress_bar = progress_bar
         # Match something like " 50%|" or " 50/100" in tqdm progress line
         self.pct_regex = re.compile(r'(\d+)%')
+        # rclip's scan starts with no total: a separate thread is still counting the folder, so tqdm
+        # draws "4654images [00:05, 940.12images/s]" with no percentage in it at all. Reading the
+        # counts directly is what lets the bar mean something for that whole stretch, which on a
+        # large image folder is most of the wait.
+        self.count_regex = re.compile(r'(\d[\d,]*)\s*/\s*(\d[\d,]*)')
+        self.scanned_regex = re.compile(r'^(\d[\d,]*)\s*images(?!/)')
 
     def write(self, text):
         self.root.after(0, self._safe_write, text)
@@ -120,15 +126,40 @@ class CustomStdout:
             elif "Attaching visual similarity scores" in clean_line:
                 self.status_var.set("Applying rclip visual ranks...")
 
+    def _determinate(self, percentage):
+        if self.progress_bar["mode"] != "determinate":
+            self.progress_bar.stop()
+            self.progress_bar.config(mode="determinate")
+        # maximum is set here rather than assumed: a store fetch in this tab leaves it at that
+        # store's product count, and a percentage read against it would draw a nearly empty bar.
+        self.progress_bar.config(maximum=100, value=percentage)
+
     def _show_progress(self, line):
-        match = self.pct_regex.search(line)
-        if match:
-            percentage = int(match.group(1))
-            if self.progress_bar["mode"] != "determinate":
-                self.progress_bar.stop()
-                self.progress_bar.config(mode="determinate")
-            self.progress_bar["value"] = percentage
-            if "download" in line.lower():
+        is_download = "download" in line.lower()
+        counts = self.count_regex.search(line)
+        scanned = self.scanned_regex.match(line)
+        pct = self.pct_regex.search(line)
+
+        if counts:
+            done = int(counts.group(1).replace(",", ""))
+            total = int(counts.group(2).replace(",", ""))
+            if total > 0:
+                percentage = min(100, int(done * 100 / total))
+                self._determinate(percentage)
+                what = "Downloading images" if is_download else "Scanning & indexing images"
+                self.status_var.set(f"{what}: {done:,} of {total:,} ({percentage}%)...")
+        elif scanned and not is_download:
+            # Still counting the folder, so there is no total to divide by yet. Show the running
+            # count, which does move, instead of a bar that says nothing.
+            found = int(scanned.group(1).replace(",", ""))
+            if self.progress_bar["mode"] != "indeterminate":
+                self.progress_bar.config(mode="indeterminate", maximum=100, value=0)
+                self.progress_bar.start(10)
+            self.status_var.set(f"Scanning images for changes: {found:,} checked so far...")
+        elif pct:
+            percentage = int(pct.group(1))
+            self._determinate(percentage)
+            if is_download:
                 self.status_var.set(f"Downloading images: {percentage}%...")
             else:
                 self.status_var.set(f"Scanning & indexing images: {percentage}%...")
