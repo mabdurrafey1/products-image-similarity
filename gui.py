@@ -1167,7 +1167,9 @@ class SearchTab(ttk.Frame):
         refresh.pack(side="left", padx=(5, 0))
         images = ttk.Button(footer, text="⬇ Sync Images", command=self._sync_images_from_dialog)
         images.pack(side="left", padx=(5, 0))
-        self._stores_widgets += [load, fetch, refresh, images]
+        combine = ttk.Button(footer, text="⇄ Combine Stores", command=self._combine_from_dialog)
+        combine.pack(side="left", padx=(5, 0))
+        self._stores_widgets += [load, fetch, refresh, images, combine]
         ttk.Button(footer, text="Close", command=self._close_stores).pack(side="right")
 
         # Drawn again whenever the stores change, which can happen while a task is still running:
@@ -1255,6 +1257,55 @@ class SearchTab(ttk.Frame):
             self._store_log(f"Not fetched yet, so no images to sync: {', '.join(never)}.")
         self._start_store_task(f"Syncing images for {len(paths)} store(s)...",
                                self._sync_images, paths)
+
+    def _combine_from_dialog(self):
+        """Combine every ticked, already-fetched store into one workbook, in its own folder.
+
+        The tick is the choice here as it is for Fetch, Refresh and Sync Images. A store nobody has
+        fetched has no workbook to combine, so it is named rather than passed over in silence.
+        """
+        labels = self._ticked_stores()
+        if not labels:
+            messagebox.showinfo("Combine Stores", "Tick the stores to combine first.")
+            return
+        never = [label for label in labels if not self._has_listing(label)]
+        paths = [noon_store.find_listing(self.store_choices[label], "input_data")
+                 for label in labels if self._has_listing(label)]
+        if not paths:
+            messagebox.showinfo("Combine Stores", "None of the ticked stores has been fetched yet, so "
+                                                   "there is nothing to combine. Use Fetch Store first:"
+                                                   "\n\n" + "\n".join(never))
+            return
+        if never:
+            self._store_log(f"Not fetched yet, so left out of the combine: {', '.join(never)}.")
+        self._start_store_task(f"Combining {len(paths)} store(s)...", self._combine_stores, paths)
+
+    def _combine_stores(self, paths):
+        """Stack every ticked store's Products sheet into one workbook, in its own folder.
+
+        A separate folder (rather than dropping it beside the per-store workbooks) keeps it from being
+        picked up as just another store the next time stores are listed, and from being combined into
+        itself on a later Combine.
+        """
+        import pandas as pd
+        from noon_store.adapters import excel_repository as repo
+
+        frames = []
+        for path in paths:
+            frame = pd.read_excel(path, sheet_name=repo.PRODUCTS_SHEET, dtype=str).fillna("")
+            frame["Source File"] = os.path.basename(path)
+            frames.append(frame)
+        combined = pd.concat(frames, ignore_index=True, sort=False)
+
+        folder = os.path.join("input_data", "Combined")
+        os.makedirs(folder, exist_ok=True)
+        stamp = time.strftime("%Y-%m-%d %H%M")
+        location = os.path.join(folder, f"Combined Stores ({stamp}).xlsx")
+        temp = os.path.join(folder, f".{os.path.basename(location)}")
+        with pd.ExcelWriter(temp, engine="openpyxl") as writer:
+            combined.to_excel(writer, sheet_name=repo.PRODUCTS_SHEET, index=False)
+        os.replace(temp, location)
+        return f"Combined {len(combined):,} products from {len(paths)} store(s) into '{os.path.basename(location)}'.", [location]
 
     def _sync_images(self, paths):
         """Fetch the images the saved listings name but the images folder hasn't got.
@@ -1575,6 +1626,8 @@ class DuplicateFinderGUI:
         self.update_btn = ttk.Button(top_bar, text="↻ Check for Updates",
                                      command=self.check_for_updates)
         self.update_btn.pack(side="right", padx=5, pady=5)
+        ttk.Label(top_bar, text=f"v{version}" if version != "dev" else "dev build",
+                  foreground="#6b7280", font=("Segoe UI", 9)).pack(side="right", padx=5, pady=5)
         self._pending_update = None
         self.root.after(2000, self._check_updates_quietly)
         
