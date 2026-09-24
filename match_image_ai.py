@@ -316,7 +316,8 @@ def run_visual_search(image_dir, query_path, no_indexing=False):
         print(f"Warning: Could not run rclip visual search: {e}")
     return visual_scores
 
-def run_semantic_text_search(df, reference_title, visual_scores, min_text_sim, strict=False):
+def run_semantic_text_search(df, reference_title, visual_scores, min_text_sim, strict=False,
+                             min_strong_text=0.85):
     """Find products matching text criteria using semantic text similarity."""
     text_matches = []
     
@@ -357,7 +358,12 @@ def run_semantic_text_search(df, reference_title, visual_scores, min_text_sim, s
     query_models = extract_models(clean_title(reference_title))
 
     # Step 2: Batch compute text embeddings for candidates
-    threshold = min_text_sim if min_text_sim > 0.0 else 0.70
+    # A title good enough to be kept on its own has to get through this stage first, because the
+    # Keep-on-Title bar is not applied until save_and_display_results. Collecting at the text bar
+    # alone meant the lower of the two sliders could never be reached: setting Keep-on-Title below
+    # the text threshold did nothing, because those rows were already gone.
+    text_bar = min_text_sim if min_text_sim > 0.0 else 0.70
+    threshold = min(text_bar, min_strong_text)
     batch_size = 128
     for i in range(0, len(candidates), batch_size):
         check_stop()
@@ -391,17 +397,15 @@ def run_semantic_text_search(df, reference_title, visual_scores, min_text_sim, s
     return text_matches
 
 def save_and_display_results(text_matches, visual_scores, output_path, top_limit, min_score=0.20,
-                             strong_text=0.85, base_min_score=None):
+                             strong_text=0.85):
     """Format, sort, display, and save results to JSON.
 
     A result survives on either evidence, not on the picture alone. `min_score` is the visual bar,
     raised as the run goes on to sit near the best image match; `strong_text` is the bar a title has
-    to clear to be kept in spite of its picture. A strong title is held to `base_min_score` -- the
-    threshold actually asked for -- rather than the floating one, so a single excellent image match
-    elsewhere in the set cannot cull a product that reads as the same thing.
+    to clear to be kept in spite of its picture -- in spite of it, so a title at or above that bar
+    is kept whatever the picture scored, including nothing at all. Holding it to the visual bar as
+    well meant the only product a good title ever rescued was one whose image had never downloaded.
     """
-    if base_min_score is None:
-        base_min_score = min_score
     results_data = []
     if text_matches:
         print(f"Found {len(text_matches)} products matching text criteria. Attaching visual similarity scores...")
@@ -418,8 +422,7 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
             # Kept on the strength of the title even though the image disagrees, or is missing
             # entirely. This is what makes the "very high text match" tier below reachable: before,
             # those rows were dropped here, and the tier could never fire.
-            text_ok = (semantic_sim >= strong_text
-                       and (score is None or score >= base_min_score))
+            text_ok = semantic_sim >= strong_text
             if not (visual_ok or text_ok):
                 continue
             
@@ -763,20 +766,22 @@ def main(args=None, stop_event=None):
         check_stop()
 
         # 8. Run semantic text search
+        strong_text = getattr(args, "min_strong_text", 0.85)
         text_matches = []
         if reference_title:
-            text_matches = run_semantic_text_search(df, reference_title, visual_scores, args.min_text_sim, args.strict)
+            text_matches = run_semantic_text_search(df, reference_title, visual_scores,
+                                                    args.min_text_sim, args.strict,
+                                                    min_strong_text=strong_text)
 
         check_stop()
 
         # 9. Format, sort, save and print results
         max_score = max(visual_scores.values()) if visual_scores else 0.0
         dynamic_min_score = max(args.min_score, max_score - 0.45)
-        strong_text = getattr(args, "min_strong_text", 0.85)
         print(f"Top visual score: {max_score:.3f} | Dynamic visual threshold: {dynamic_min_score:.3f} "
               f"| Strong-title threshold: {strong_text:.2f}")
         save_and_display_results(text_matches, visual_scores, args.output, args.top, dynamic_min_score,
-                                 strong_text=strong_text, base_min_score=args.min_score)
+                                 strong_text=strong_text)
 
     finally:
         # Always clear the per-thread stop event when done
