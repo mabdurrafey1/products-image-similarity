@@ -863,7 +863,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
 
         if ai_score is not None and ai_score > best_visual:
             best_visual = ai_score
-        if text_sim > best_text:
+        if text_sim is not None and text_sim > best_text:
             best_text = text_sim
 
         # Find local image path or fallback

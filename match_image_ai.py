@@ -6,6 +6,9 @@ import re
 import pandas as pd
 
 import threading
+from concurrent.futures import ThreadPoolExecutor
+
+MATCH_WORKERS = min(32, (os.cpu_count() or 4) * 4)
 
 # Legacy global flag kept for backward compatibility with CLI usage.
 # GUI tabs pass a per-tab threading.Event instead.
@@ -336,22 +339,25 @@ def run_semantic_text_search(df, reference_title, visual_scores, min_text_sim, s
 
     print("Performing text similarity search across all products in Excel...")
     
-    # Step 1: Pre-filter by quick keyword overlap and check if visual score is available to reduce candidates
-    candidates = []
-    for idx, row in df.iterrows():
-        check_stop()
-        sku = str(row.get('SKU', '')).strip().upper()
-        # Deliberately not requiring a visual score here. A product whose image was never downloaded
-        # has no score at all, and skipping it meant its title was never even read -- so a listing
-        # that named the same product word for word could not be found for want of a picture.
+    # Step 1: Pre-filter by quick keyword overlap and check if visual score is available to reduce candidates.
+    # Every row is independent pure-Python work (regex/string comparisons, no shared state), so it is
+    # split across a thread pool instead of run one row at a time.
+    def score_row(item):
+        idx, row = item
         title = str(row.get('Title', ''))
         if not title:
-            continue
-        
-        # Simple keyword overlap pre-filter
+            return None
         if get_title_similarity(reference_title, title) > 0.0:
-            candidates.append((idx, row, title))
-    
+            return (idx, row, title)
+        return None
+
+    candidates = []
+    with ThreadPoolExecutor(max_workers=MATCH_WORKERS) as executor:
+        for result in executor.map(score_row, df.iterrows()):
+            check_stop()
+            if result is not None:
+                candidates.append(result)
+
     print(f"Found {len(candidates)} candidate products with keyword overlap. Computing semantic similarity...")
     
     # Pre-extract model codes from the query reference
