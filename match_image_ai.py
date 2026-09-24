@@ -352,7 +352,7 @@ def run_semantic_text_search(df, reference_title, visual_scores, min_text_sim, s
         if get_title_similarity(reference_title, title) > 0.0:
             candidates.append((idx, row, title))
     
-    print(f"Found {len(candidates)} candidate products with keyword overlap and visual score. Computing semantic similarity...")
+    print(f"Found {len(candidates)} candidate products with keyword overlap. Computing semantic similarity...")
     
     # Pre-extract model codes from the query reference
     query_models = extract_models(clean_title(reference_title))
@@ -407,6 +407,32 @@ def run_semantic_text_search(df, reference_title, visual_scores, min_text_sim, s
         print()
     return text_matches
 
+def find_visual_only_matches(df, visual_scores, covered_skus, min_score):
+    """Products whose picture alone clears the bar, however their title reads.
+
+    run_semantic_text_search never even considers a title with zero keyword overlap with the
+    reference title -- so this is the only path back for a listing that is the same product,
+    photographed the same way, but described in different words. Every row here carries no text
+    similarity at all (never computed, not zero), which is what lets the report say so honestly
+    instead of implying a title was checked and failed.
+    """
+    if not visual_scores:
+        return []
+    sku_to_idx = {}
+    for idx, row in df.iterrows():
+        sku = str(row.get('SKU', '')).strip().upper()
+        if sku and sku not in sku_to_idx:
+            sku_to_idx[sku] = idx
+    matches = []
+    for sku, score in visual_scores.items():
+        if score < min_score or sku in covered_skus:
+            continue
+        idx = sku_to_idx.get(sku)
+        if idx is None:
+            continue
+        matches.append({"row": df.loc[idx], "idx": idx, "semantic_sim": None})
+    return matches
+
 def save_and_display_results(text_matches, visual_scores, output_path, top_limit, min_score=0.20,
                              strong_text=0.85):
     """Format, sort, display, and save results to JSON.
@@ -419,7 +445,7 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
     """
     results_data = []
     if text_matches:
-        print(f"Found {len(text_matches)} products matching text criteria. Attaching visual similarity scores...")
+        print(f"Evaluating {len(text_matches)} candidate products (matched by title or by picture). Attaching visual similarity scores...")
         for match in text_matches:
             row = match["row"]
             idx = match["idx"]
@@ -433,7 +459,7 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
             # Kept on the strength of the title even though the image disagrees, or is missing
             # entirely. This is what makes the "very high text match" tier below reachable: before,
             # those rows were dropped here, and the tier could never fire.
-            text_ok = semantic_sim >= strong_text
+            text_ok = semantic_sim is not None and semantic_sim >= strong_text
             if not (visual_ok or text_ok):
                 continue
             
@@ -496,7 +522,12 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
         # Sort results descending by Sort Key tuple
         results_data.sort(key=lambda x: x["Sort Key"], reverse=True)
         
-        # Limit the results saved to the user's requested top_limit
+        # Limit the results saved to the user's requested top_limit -- said out loud, because a
+        # cap that trims silently reads identically to a run that only ever found this many.
+        total_kept = len(results_data)
+        if total_kept > top_limit:
+            print(f"{total_kept} products passed the thresholds; showing the top {top_limit} "
+                  f"(raise the Top N setting to see the rest).")
         results_data = results_data[:top_limit]
         
         # Assign rank based on final sorted order
@@ -508,7 +539,8 @@ def save_and_display_results(text_matches, visual_scores, output_path, top_limit
     print("-" * 80)
     for item in results_data[:top_limit]:
         ai_score_str = f"{item['AI Score']:.3f}" if item['AI Score'] is not None else "None"
-        print(f"Rank: {item['Rank']} | Source: {item['Source File']} | Row: {item['Row']} | SKU: {item['SKU']} | Price: {item['Price']} | AI Score: {ai_score_str} | Text Sim: {item['Text Similarity']:.3f}")
+        text_sim_str = f"{item['Text Similarity']:.3f}" if item['Text Similarity'] is not None else "None"
+        print(f"Rank: {item['Rank']} | Source: {item['Source File']} | Row: {item['Row']} | SKU: {item['SKU']} | Price: {item['Price']} | AI Score: {ai_score_str} | Text Sim: {text_sim_str}")
         print(f"Title: {item['Title']}")
         print(f"Image: {item['Source File']} (SKU: {item['SKU']})")
         print("-" * 80)
@@ -721,6 +753,7 @@ def main(args=None, stop_event=None):
         except Exception as e:
             print(f"Error loading dataset: {e}")
             return
+        print(f"Loaded {len(df)} products from the database.")
 
         # Filter by Price Range if specified
         if (args.min_price is not None) or (args.max_price is not None):
@@ -742,26 +775,18 @@ def main(args=None, stop_event=None):
 
         check_stop()
 
-        # 4. Filter downloader queue by title overlap
-        download_df = df
-        if reference_title:
-            print("Pre-filtering database to download images only for keyword-overlapping products...")
-            matching_indices = []
-            for idx, row in df.iterrows():
-                check_stop()
-                title = str(row.get('Title', ''))
-                if title and get_title_similarity(reference_title, title) > 0.0:
-                    matching_indices.append(idx)
-            if matching_indices:
-                download_df = df.loc[matching_indices]
-                print(f"Filtered download queue: {len(download_df)} products with keyword overlap (down from {len(df)} total).")
-            else:
-                print("Warning: No products found with keyword overlap. Downloading all missing images as fallback.")
+        # 4. Download every product's image, not just the keyword-overlapping ones. A picture
+        # match is the only way back for a product whose title shares no word with the reference
+        # title (see find_visual_only_matches below) -- pre-filtering the download queue by keyword
+        # would make that recovery only work when the image happened to already be cached from an
+        # earlier, differently-worded search. download_missing_images skips whatever is already on
+        # disk, so a repeat run against the same store only ever pays for what actually changed.
+        print(f"Downloading images for all {len(df)} products in the database...")
 
         check_stop()
 
         # 5. Automatically download missing images
-        download_missing_images(download_df, image_dir=args.image_dir, max_workers=args.workers)
+        download_missing_images(df, image_dir=args.image_dir, max_workers=args.workers)
 
         check_stop()
 
@@ -789,10 +814,22 @@ def main(args=None, stop_event=None):
         # 9. Format, sort, save and print results
         max_score = max(visual_scores.values()) if visual_scores else 0.0
         dynamic_min_score = max(args.min_score, max_score - 0.45)
+
+        # Recover products whose picture matches well enough on its own, however their title reads
+        # -- the other half of "never miss a product": step 8 never even considers a title with no
+        # keyword overlap with the reference title, so this is the only way one of those comes
+        # back. Uses the same visual bar as everything else in the report, so "matched by image"
+        # means the same thing everywhere it appears.
+        covered_skus = {str(m["row"].get("SKU", "")).strip().upper() for m in text_matches}
+        visual_only_matches = find_visual_only_matches(df, visual_scores, covered_skus, dynamic_min_score)
+        if visual_only_matches:
+            print(f"Found {len(visual_only_matches)} more products by picture alone -- "
+                  f"their titles never shared a keyword with '{reference_title}'.")
+
         print(f"Top visual score: {max_score:.3f} | Dynamic visual threshold: {dynamic_min_score:.3f} "
               f"| Strong-title threshold: {strong_text:.2f}")
-        save_and_display_results(text_matches, visual_scores, args.output, args.top, dynamic_min_score,
-                                 strong_text=strong_text)
+        save_and_display_results(text_matches + visual_only_matches, visual_scores, args.output, args.top,
+                                 dynamic_min_score, strong_text=strong_text)
 
     finally:
         # Always clear the per-thread stop event when done

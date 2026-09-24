@@ -1509,7 +1509,10 @@ class DuplicateFinderGUI:
     def __init__(self, root):
         self.root = root
         match_image_ai.setup_global_input_data_dir()
-        self.root.title("AI Product Duplicate Finder")
+        import updater
+        version = updater.current_version()
+        title = "AI Product Duplicate Finder" if version == "dev" else f"AI Product Duplicate Finder ({version})"
+        self.root.title(title)
         
         # Full screen height, centred horizontally at the top of the screen
         screen_width, screen_height = self.root.winfo_screenwidth(), self.root.winfo_screenheight()

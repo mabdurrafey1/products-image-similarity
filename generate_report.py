@@ -792,6 +792,13 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                 <p class="sidebar-subtext">Database price range: {min_db_price} to {max_db_price} (strict filter)</p>
             </div>
 {source_filter_placeholder}
+            <!-- KEYWORD TO TOP -->
+            <div class="sidebar-section">
+                <label class="sidebar-label">KEYWORD TO TOP</label>
+                <input type="text" id="keywordBoost" class="price-input" style="width: 100%;" placeholder="e.g. S10" oninput="applyFilters()">
+                <p class="sidebar-subtext">Products whose title contains this move to the top, ahead of the sort below.</p>
+            </div>
+
             <!-- SORT BY -->
             <div class="sidebar-section">
                 <label class="sidebar-label">SORT BY</label>
@@ -1092,6 +1099,13 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
             const sortBy = document.getElementById('sortBy').value;
             const sourceFilterEl = document.getElementById('sourceFilter');
             const sourceFilter = sourceFilterEl ? sourceFilterEl.value : 'all';
+            const keywordBoostEl = document.getElementById('keywordBoost');
+            const keywordBoost = keywordBoostEl ? keywordBoostEl.value.trim().toLowerCase() : '';
+            const matchesKeyword = card => {
+                if (!keywordBoost) return false;
+                const titleEl = card.querySelector('.product-title');
+                return titleEl ? titleEl.textContent.toLowerCase().includes(keywordBoost) : false;
+            };
 
             const grid = document.querySelector('.results-grid');
             const cards = Array.from(document.querySelectorAll('.match-card'));
@@ -1128,6 +1142,15 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                 return isNaN(price) || price <= 0 ? null : price;
             };
             cards.sort((a, b) => {
+                // A keyword match always sorts above a non-match, whatever the field below sorts by;
+                // ties between two matches (or two non-matches) fall through to that normal ordering.
+                if (keywordBoost) {
+                    const boostA = matchesKeyword(a);
+                    const boostB = matchesKeyword(b);
+                    if (boostA !== boostB) {
+                        return boostA ? -1 : 1;
+                    }
+                }
                 const valueA = sortValue(a);
                 const valueB = sortValue(b);
                 if (valueA === null || valueB === null) {
