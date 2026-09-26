@@ -70,6 +70,17 @@ def load_excel_with_sheets(file_path):
         df = pd.read_excel(file_path)
         return normalize_dataframe(df)
 
+def _load_frame(path):
+    """load_excel_with_sheets(path), served from the catalog database the search already filled."""
+    if os.path.isfile(path):
+        try:
+            import match_image_ai
+        except Exception:
+            match_image_ai = None
+        if match_image_ai is not None:
+            return match_image_ai.load_source_frame(path, quiet=True)
+    return load_excel_with_sheets(path)
+
 def generate_html_report(json_path="temp/search_results_ai.json", output_html="temp/search_results.html", images_dir="downloaded_images", excel_path=None, query_title="", query_images=None, priority_keywords=None):
     if excel_path is None:
         import glob
@@ -129,13 +140,18 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
     # Keyed by (source file basename, SKU uppercased) to avoid collisions across files.
     extra_attrs = {}
     excel_paths = [p.strip() for p in str(excel_path).split(";") if p.strip()]
+    # Only the results' SKUs are ever looked up, so only their rows are read (in file order, so the
+    # last duplicate still wins) instead of walking every row of a 100k-product catalog.
+    wanted_skus = {str(item.get('SKU', '')).strip().upper() for item in results}
     for ep in excel_paths:
         try:
-            df = load_excel_with_sheets(ep)
+            df = _load_frame(ep)
             source_name = os.path.basename(ep)
             # Identify columns other than basic ones
             standard_cols = {'SKU', 'Title', 'Price', 'Image URL', 'Source File'}
             extra_cols = [col for col in df.columns if col not in standard_cols]
+            if 'SKU' in df.columns and df.columns.is_unique:
+                df = df[[str(v).upper() in wanted_skus for v in df['SKU'].tolist()]]
             for _, row in df.iterrows():
                 sku = str(row.get('SKU', ''))
                 if sku:
@@ -166,7 +182,9 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                 </select>
             </div>"""
 
-    html_content = """<!DOCTYPE html>
+    # Built as a list of chunks and joined once at the end instead of repeated string concatenation:
+    # a report of thousands of cards was doing thousands of full-string copies via `+=` otherwise.
+    html_parts = ["""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -401,6 +419,9 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
 
         /* Card Style */
         .match-card {
+            /* Off-screen cards are skipped until scrolled near, so 5,000 cards draw like a few dozen */
+            content-visibility: auto;
+            contain-intrinsic-size: auto 460px;
             background: var(--bg-card);
             border: 1px solid var(--border-color);
             border-radius: 12px;
@@ -847,7 +868,7 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                 </header>
 
                 <div class="results-grid">
-"""
+"""]
 
     best_visual = 0.0
     best_text = 0.0
@@ -930,10 +951,10 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
             
             # Show up to 6 thumbnails
             for i, u in enumerate(img_urls_list[:6]):
-                thumbnails_html += f'<img class="thumb-img" src="{u}" alt="thumb" onclick="swapMainImage(this, \'{sku}\')">'
+                thumbnails_html += f'<img class="thumb-img" src="{u}" loading="lazy" alt="thumb" onclick="swapMainImage(this, \'{sku}\')">'
         else:
             # If no combined urls, just show the main image in thumbnail row
-            thumbnails_html += f'<img class="thumb-img active" src="{html_image_path}" alt="thumb">'
+            thumbnails_html += f'<img class="thumb-img active" src="{html_image_path}" loading="lazy" alt="thumb">'
 
         price_str = f"AED {price:.0f}" if price else "N/A"
         match_badge_str = f"{match_count} SKU" if match_count else "1 SKU"
@@ -957,18 +978,18 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
         else:
             psku_pill = ("""<div class="sku-pill-half missing" title="This product has no PSKU">"""
                          """<span class="sku-label psku">PSKU:</span><span class="sku-value">&mdash;</span></div>""")
-        html_content += f"""<div class="match-card" data-sku="{sku}" data-zsku="{zsku}" data-psku="{psku}" data-rank="{rank}" data-vs="{vs_attr}" data-tx="{tx_attr}" data-source="{source_file}">
+        html_parts.append(f"""<div class="match-card" data-sku="{sku}" data-zsku="{zsku}" data-psku="{psku}" data-rank="{rank}" data-vs="{vs_attr}" data-tx="{tx_attr}" data-source="{source_file}">
 <div class="card-select-row"><label><input type="checkbox" class="select-checkbox" data-sku="{sku}" data-zsku="{zsku}" data-psku="{psku}" onchange="updateSelection()"> Select</label><span class="rank-badge-container"><span>Orig: #{rank}</span><span class="new-rank-badge">New: #{rank}</span></span></div>
-<div class="image-container"><div class="verify-badge-overlay"><span class="verify-dot {url_ready_class}" title="URL Ready: {url_status}"></span><span class="verify-dot {image_ready_class}" title="Image Ready: {image_status}"></span></div><img id="mainImg_{sku}" src="{html_image_path}" alt="" onerror="imgFallback(this)"><div class="image-bottom-overlay"><span class="overlay-badge badge-price">{price_str}</span><div class="badge-pair"><span class="overlay-badge badge-vs" title="Visual Similarity Score">{ai_score_str}</span><span class="overlay-badge badge-tx" title="Text Similarity Score">{text_sim_str}</span></div></div></div>
+<div class="image-container"><div class="verify-badge-overlay"><span class="verify-dot {url_ready_class}" title="URL Ready: {url_status}"></span><span class="verify-dot {image_ready_class}" title="Image Ready: {image_status}"></span></div><img id="mainImg_{sku}" src="{html_image_path}" loading="lazy" decoding="async" alt="" onerror="imgFallback(this)"><div class="image-bottom-overlay"><span class="overlay-badge badge-price">{price_str}</span><div class="badge-pair"><span class="overlay-badge badge-vs" title="Visual Similarity Score">{ai_score_str}</span><span class="overlay-badge badge-tx" title="Text Similarity Score">{text_sim_str}</span></div></div></div>
 <div class="product-title expanded">{title}</div><button type="button" class="title-toggle" onclick="toggleTitle(this)">Show less</button>
 <div class="tags-row">{tags_html}<span class="tag-pill">{img_count} imgs</span><span class="tag-pill tag-match">{match_badge_str}</span><span class="tag-pill tag-source" title="Source Excel file">{source_file}</span></div>
 <div class="sku-container-row"><div class="sku-pill-half" onclick="copyTextDirect('{sku}')" title="Click to copy SKU"><span class="sku-label">SKU:</span><span class="sku-value">{sku}</span></div>{psku_pill}</div>
 <div class="thumbnails-row">{thumbnails_html}</div>
 <div class="actions-row"><button class="action-btn btn-view" onclick="viewImage('{html_image_path}')">View</button><a class="action-btn btn-open" href="{product_url}" target="_blank">Open</a><button class="action-btn btn-copy" onclick="copyTextDirect('{psku if psku else sku}')">Copy {'PSKU' if psku else 'SKU'}</button></div>
 </div>
-"""
+""")
 
-    html_content += """
+    html_parts.append("""
         </div>
     </div>
 </div>
@@ -1033,30 +1054,39 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
             btn.innerText = expanded ? 'Show less' : 'Show more';
         }
 
+        // Height of a collapsed title (the 2.2rem box in .product-title), so an expanded title can be
+        // checked without collapsing it: toggling the class per title made the browser lay out the
+        // whole page once per card, which froze a 5,000-card report for minutes.
+        function collapsedTitleHeight() {
+            return 2.2 * parseFloat(getComputedStyle(document.documentElement).fontSize);
+        }
+
+        function updateTitleToggles(titleEls) {
+            const clamp = collapsedTitleHeight();
+            // All reads first, then all writes: one layout for the whole batch
+            const results = titleEls.map(titleEl => {
+                const btn = titleEl.nextElementSibling;
+                if (!btn || !btn.classList.contains('title-toggle')) return null;
+                // Hidden (filtered-out or off-screen) cards report 0 sizes; they get re-checked when shown
+                const limit = titleEl.classList.contains('expanded') ? clamp : titleEl.clientHeight;
+                return [btn, titleEl.scrollHeight > limit + 1];
+            });
+            results.forEach(r => { if (r) r[0].classList.toggle('visible', r[1]); });
+        }
+
         function updateTitleToggle(titleEl) {
-            const btn = titleEl.nextElementSibling;
-            if (!btn || !btn.classList.contains('title-toggle')) return;
-            // Titles start expanded, so measure the clamped height to know whether there is anything to collapse
-            const expanded = titleEl.classList.contains('expanded');
-            if (expanded) titleEl.classList.remove('expanded');
-            // Hidden (filtered-out) cards report 0 sizes; they get re-checked when shown
-            const overflows = titleEl.scrollHeight > titleEl.clientHeight + 1;
-            if (expanded) titleEl.classList.add('expanded');
-            btn.classList.toggle('visible', overflows);
+            updateTitleToggles([titleEl]);
         }
 
         document.addEventListener('DOMContentLoaded', () => {
             renderKeywordBoostChips();
             if (keywordBoostList.length) applyFilters();
-            const titles = document.querySelectorAll('.product-title');
-            // Re-check whenever a title's box changes (resize, filters showing a card)
+            // Checked when a title's box changes (first shown, scrolled into view, resized, filtered in),
+            // a whole batch at a time; off-screen cards aren't laid out until they come near the screen
             const observer = new ResizeObserver(entries => {
-                entries.forEach(entry => updateTitleToggle(entry.target));
+                updateTitleToggles(entries.map(entry => entry.target));
             });
-            titles.forEach(t => {
-                updateTitleToggle(t);
-                observer.observe(t);
-            });
+            document.querySelectorAll('.product-title').forEach(t => observer.observe(t));
         });
 
         /* Selection Feature Logic */
@@ -1064,8 +1094,18 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
         let selectedZSKUs = new Set();
         let selectedPSKUs = new Set();
 
+        // Cards in the order they're shown. Sorting sets each card's CSS `order` instead of moving it
+        // in the page: moving 5,000 cards took ~9 s, setting their order takes a fraction of that.
+        let cardOrder = null;
+
+        function cardsInDisplayOrder() {
+            return cardOrder || Array.from(document.querySelectorAll('.match-card'));
+        }
+
         function updateSelection() {
-            const checkboxes = document.querySelectorAll('.select-checkbox');
+            const checkboxes = cardOrder
+                ? cardOrder.map(card => card.querySelector('.select-checkbox')).filter(Boolean)
+                : document.querySelectorAll('.select-checkbox');
             selectedSKUs.clear();
             selectedZSKUs.clear();
             selectedPSKUs.clear();
@@ -1172,13 +1212,17 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                 return keywordBoostList.some(kw => titleLower.includes(kw));
             };
 
-            const grid = document.querySelector('.results-grid');
-            const cards = Array.from(document.querySelectorAll('.match-card'));
+            // Start from the order shown now, so ties keep their place as they did when cards were moved
+            const cards = cardsInDisplayOrder().slice();
+            // textContent, not innerText: innerText makes the browser lay the page out on every read
+            const priceTextOf = card => {
+                const priceBadge = card.querySelector('.badge-price');
+                return priceBadge ? priceBadge.textContent.replace('AED', '').replace('N/A', '').trim() : '';
+            };
 
             // 1. Filter visibility
             cards.forEach(card => {
-                const priceBadge = card.querySelector('.badge-price');
-                const priceText = priceBadge ? priceBadge.innerText.replace('AED', '').replace('N/A', '').trim() : '';
+                const priceText = priceTextOf(card);
                 const price = parseFloat(priceText) || 0;
 
                 let show = true;
@@ -1202,22 +1246,24 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
                     const score = parseFloat(card.getAttribute('data-' + sortBy));
                     return isNaN(score) ? null : score;
                 }
-                const priceBadge = card.querySelector('.badge-price');
-                const price = priceBadge ? parseFloat(priceBadge.innerText.replace('AED', '').replace('N/A', '').trim()) : NaN;
+                const price = card.querySelector('.badge-price') ? parseFloat(priceTextOf(card)) : NaN;
                 return isNaN(price) || price <= 0 ? null : price;
             };
+            // Worked out once per card, not once per comparison
+            const keys = new Map(cards.map(card => [card, {boost: matchesKeyword(card), value: sortValue(card)}]));
             cards.sort((a, b) => {
+                const ka = keys.get(a), kb = keys.get(b);
                 // A keyword match always sorts above a non-match, whatever the field below sorts by;
                 // ties between two matches (or two non-matches) fall through to that normal ordering.
                 if (keywordBoostList.length) {
-                    const boostA = matchesKeyword(a);
-                    const boostB = matchesKeyword(b);
+                    const boostA = ka.boost;
+                    const boostB = kb.boost;
                     if (boostA !== boostB) {
                         return boostA ? -1 : 1;
                     }
                 }
-                const valueA = sortValue(a);
-                const valueB = sortValue(b);
+                const valueA = ka.value;
+                const valueB = kb.value;
                 if (valueA === null || valueB === null) {
                     return (valueA === null) - (valueB === null);
                 }
@@ -1226,16 +1272,17 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
 
             // 3. Re-append in sorted order and update new rank badges
             let visibleIndex = 1;
-            cards.forEach(card => {
-                grid.appendChild(card);
+            cards.forEach((card, position) => {
+                card.style.order = String(position);
                 if (card.style.display !== 'none') {
                     const newRankSpan = card.querySelector('.new-rank-badge');
                     if (newRankSpan) {
-                        newRankSpan.innerText = 'New: #' + visibleIndex;
+                        newRankSpan.textContent = 'New: #' + visibleIndex;
                     }
                     visibleIndex++;
                 }
             });
+            cardOrder = cards;
             
             // Clear selections that are now hidden
             updateSelection();
@@ -1249,23 +1296,30 @@ def generate_html_report(json_path="temp/search_results_ai.json", output_html="t
     </script>
 </body>
 </html>
-"""
+""")
+    html_content = "".join(html_parts)
 
     # Format the header values
     excel_basenames = [os.path.basename(p) for p in excel_paths] if excel_paths else [os.path.basename(str(excel_path))]
     excel_display_name = ", ".join(excel_basenames) if len(excel_basenames) <= 3 else f"{len(excel_basenames)} files"
     priority_keywords_json = json.dumps([str(k) for k in (priority_keywords or []) if str(k).strip()])
 
-    html_content = html_content.replace("{excel_display_name}", excel_display_name)
-    html_content = html_content.replace("{total_matches}", str(len(results)))
-    html_content = html_content.replace("{best_visual}", f"{best_visual:.3f}" if best_visual else "N/A")
-    html_content = html_content.replace("{best_text}", f"{best_text:.3f}" if best_text else "N/A")
-    html_content = html_content.replace("{min_db_price}", str(min_db_price))
-    html_content = html_content.replace("{max_db_price}", str(max_db_price))
-    html_content = html_content.replace("{query_title_placeholder}", query_title_html)
-    html_content = html_content.replace("{query_images_placeholder}", query_images_html)
-    html_content = html_content.replace("{source_filter_placeholder}", source_filter_section)
-    html_content = html_content.replace("{priority_keywords_json}", priority_keywords_json)
+    # One pass over the (multi-megabyte, on a large catalog) string instead of nine separate
+    # full-string scans -- one per placeholder plus the indentation regex.
+    placeholders = {
+        "{excel_display_name}": excel_display_name,
+        "{total_matches}": str(len(results)),
+        "{best_visual}": f"{best_visual:.3f}" if best_visual else "N/A",
+        "{best_text}": f"{best_text:.3f}" if best_text else "N/A",
+        "{min_db_price}": str(min_db_price),
+        "{max_db_price}": str(max_db_price),
+        "{query_title_placeholder}": query_title_html,
+        "{query_images_placeholder}": query_images_html,
+        "{source_filter_placeholder}": source_filter_section,
+        "{priority_keywords_json}": priority_keywords_json,
+    }
+    placeholder_re = re.compile("|".join(re.escape(k) for k in placeholders))
+    html_content = placeholder_re.sub(lambda m: placeholders[m.group(0)], html_content)
     # Drop the indentation of every line (line breaks stay, so the script's // comments still end where they did)
     html_content = re.sub(r"\n[ \t]+", "\n", html_content)
 

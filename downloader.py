@@ -2,6 +2,62 @@ import os
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+def _build_download_tasks_by_row(df, image_dir):
+    download_tasks = []
+    for idx, row in df.iterrows():
+        sku = str(row.get('SKU', '')).strip()
+        url = str(row.get('Image URL', '')).strip()
+        if not sku or not url or url.lower() == 'nan':
+            continue
+        
+        # Check if image already exists
+        img_name = f"{sku}.jpg"
+        img_path = os.path.join(image_dir, img_name)
+        if not os.path.exists(img_path):
+            download_tasks.append((sku, url, img_path))
+    return download_tasks
+
+def build_download_tasks(df, image_dir):
+    """[(sku, url, destination)] for every row whose image isn't on disk yet, in row order.
+
+    Reads the two columns whole and checks names against one listing of the folder, instead of a
+    row-by-row walk with a stat per row. Only a plain file the listing names counts as present on
+    its own; any other name is asked of os.path.exists, exactly as the row walk did.
+    """
+    try:
+        import match_image_ai
+        if not match_image_ai._rows_are_objects(df):
+            return _build_download_tasks_by_row(df, image_dir)
+    except Exception:
+        return _build_download_tasks_by_row(df, image_dir)
+    n = len(df)
+    skus = df['SKU'].tolist() if 'SKU' in df.columns else [''] * n
+    urls = df['Image URL'].tolist() if 'Image URL' in df.columns else [''] * n
+    present = set()
+    try:
+        with os.scandir(image_dir) as entries:
+            for entry in entries:
+                try:
+                    if entry.is_file(follow_symlinks=False):
+                        present.add(entry.name)
+                except OSError:
+                    pass
+    except OSError:
+        present = set()
+    download_tasks = []
+    for sku, url in zip(skus, urls):
+        sku = str(sku).strip()
+        url = str(url).strip()
+        if not sku or not url or url.lower() == 'nan':
+            continue
+        img_name = f"{sku}.jpg"
+        img_path = os.path.join(image_dir, img_name)
+        if img_name in present and os.sep not in img_name and (os.altsep is None or os.altsep not in img_name):
+            continue
+        if not os.path.exists(img_path):
+            download_tasks.append((sku, url, img_path))
+    return download_tasks
+
 def download_missing_images(df, image_dir="downloaded_images", max_workers=10, should_stop=None):
     """
     Checks the loaded pandas DataFrame for product SKU and Image URL values,
@@ -17,18 +73,7 @@ def download_missing_images(df, image_dir="downloaded_images", max_workers=10, s
     print("Checking for missing images in database...")
     
     # Identify items to download
-    download_tasks = []
-    for idx, row in df.iterrows():
-        sku = str(row.get('SKU', '')).strip()
-        url = str(row.get('Image URL', '')).strip()
-        if not sku or not url or url.lower() == 'nan':
-            continue
-        
-        # Check if image already exists
-        img_name = f"{sku}.jpg"
-        img_path = os.path.join(image_dir, img_name)
-        if not os.path.exists(img_path):
-            download_tasks.append((sku, url, img_path))
+    download_tasks = build_download_tasks(df, image_dir)
             
     if download_tasks:
         print(f"Found {len(download_tasks)} missing images. Starting download using {max_workers} workers...")

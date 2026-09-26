@@ -40,6 +40,9 @@ def build():
         # Imported inside a function so a dev checkout can do without it, which means PyInstaller's
         # scan never sees it; named here or the built app would report no version at all.
         "--hidden-import=_version",
+        # Also imported inside functions only; a missing one would silently turn every cache off
+        "--hidden-import=catalog_db",
+        "--hidden-import=title_vector_store",
         "--name=AI_Product_Duplicate_Finder",
         "gui.py"
     ]
